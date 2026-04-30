@@ -116,7 +116,7 @@ async function saveToGitHub() {
             p2: state.p2,
             users: state.users
         };
-        await fetch("https://api.github.com/repos/你的用户名/你的仓库名/contents/data.json", {
+        await fetch("https://api.github.com/repos/zjw-github/zjw-github.github.io/contents/data.json", {
             method: "PUT",
             headers: {
                 "Accept": "application/vnd.github.v3+json",
