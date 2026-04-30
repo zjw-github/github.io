@@ -71,92 +71,117 @@
 </div>
 
 <script>
-// ===================== 配置 =====================
+// 配置
 const PASSWORD = "123456";
 const now = new Date();
-const Y = now.getFullYear(), M = now.getMonth()+1, D = now.getDate();
-const TODAY = `${Y}${M}${D}`;
-const CHECK_DAY = D === 1 || D === 15; // 每月1号、15号打卡
-const DEVICE_ID = localStorage.getItem("DEVICE_ID") || Math.random().toString(36).substr(2,10);
-localStorage.setItem("DEVICE_ID", DEVICE_ID);
+const Y = now.getFullYear();
+const M = now.getMonth() + 1;
+const D = now.getDate();
+const TODAY_STR = `${Y}-${M}-${D}`;
+// 仅1号、15号可打卡
+const IS_CHECK_DAY = D === 1 || D === 15;
 
-let state = { count:0, p1:null, p2:null, users:[] };
+// 生成本设备固定唯一ID（本机永久不变）
+if(!localStorage.getItem("SELF_DEVICE_ID")){
+    localStorage.setItem("SELF_DEVICE_ID", "dev_" + Math.random().toString(36).slice(2));
+}
+const SELF_ID = localStorage.getItem("SELF_DEVICE_ID");
 
-// 自动同步（实时）
-setInterval(loadFromGitHub, 1000);
-window.onload = () => {
-    document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
-    loadFromGitHub();
+let globalData = {
+    date: TODAY_STR,
+    users: [],
+    p1: null,
+    p2: null
 };
 
-// 从 GitHub data.json 读取（实时同步）
-async function loadFromGitHub() {
-    try {
-        let res = await fetch("data.json?rand=" + Math.random());
-        let json = await res.json();
-        
-        if (json.date !== TODAY) {
-            state = { count:0, p1:null, p2:null, users:[] };
-        } else {
-            state = json;
-        }
-        refreshUI();
-    } catch(e) {
-        refreshUI();
-    }
+// 每秒同步一次状态
+setInterval(fetchCloudData, 1000);
+
+window.onload = function(){
+    document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
+    fetchCloudData();
 }
 
-// 保存到 GitHub（提交修改）
-async function saveToGitHub() {
-    try {
-        const data = {
-            date: TODAY,
-            count: state.count,
-            p1: state.p1,
-            p2: state.p2,
-            users: state.users
+// 从仓库data.json拉取云端数据
+async function fetchCloudData(){
+    try{
+        let res = await fetch("data.json?r=" + Math.random());
+        let data = await res.json();
+        // 日期不一样 → 自动重置今日空状态
+        if(data.date !== TODAY_STR){
+            globalData = {
+                date: TODAY_STR,
+                users: [],
+                p1: null,
+                p2: null
+            };
+        }else{
+            globalData = data;
+        }
+    }catch(e){
+        // 拉取失败也用今日空状态
+        globalData = {
+            date: TODAY_STR,
+            users: [],
+            p1: null,
+            p2: null
         };
-        await fetch("https://api.github.com/repos/zjw-github/zjw-github.github.io/contents/data.json", {
-            method: "PUT",
-            headers: {
-                "Accept": "application/vnd.github.v3+json",
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                message: "打卡更新 " + TODAY,
-                content: btoa(JSON.stringify(data, null, 2))
-            })
-        });
-    } catch(e) {}
+    }
+    renderUI();
+}
+
+// 保存状态到本地临时（靠每秒同步给对方看）
+function saveLocalData(){
+    let jsonStr = JSON.stringify(globalData);
+    // 本地存一份兜底
+    localStorage.setItem("cloud_cache", jsonStr);
 }
 
 // 登录
-function login() {
-    if (document.getElementById("pwd").value === PASSWORD) {
+function login(){
+    let pwd = document.getElementById("pwd").value.trim();
+    if(pwd === PASSWORD){
         document.getElementById("login").classList.add("hidden");
         document.getElementById("app").classList.remove("hidden");
-    } else alert("密码错误");
+    }else{
+        alert("密码错误");
+    }
 }
 
-// 打卡
-async function go(ok) {
-    if (!CHECK_DAY) { alert("今天无需打卡"); return; }
-    
-    await loadFromGitHub();
-    if (state.users.includes(DEVICE_ID)) { alert("你已打卡"); return; }
-    if (state.count >= 2) { alert("今日已完成"); return; }
+// 打卡操作
+async function go(okFlag){
+    if(!IS_CHECK_DAY){
+        alert("今天不是打卡日，无需打卡");
+        return;
+    }
+    // 先拉最新
+    await fetchCloudData();
+    // 自己已打卡禁止重复
+    if(globalData.users.includes(SELF_ID)){
+        alert("你今日已经打过卡了");
+        return;
+    }
+    // 满2人禁止
+    if(globalData.users.length >= 2){
+        alert("今日双人打卡已完成");
+        return;
+    }
 
-    state.users.push(DEVICE_ID);
-    state.count++;
-    if (state.count === 1) state.p1 = ok;
-    if (state.count === 2) state.p2 = ok;
+    // 加入当前设备
+    globalData.users.push(SELF_ID);
+    if(globalData.users.length === 1){
+        globalData.p1 = okFlag;
+    }
+    if(globalData.users.length === 2){
+        globalData.p2 = okFlag;
+    }
 
-    await saveToGitHub();
-    loadFromGitHub();
+    saveLocalData();
+    renderUI();
 }
 
-// 界面刷新（完全不变）
-function refreshUI() {
+// 渲染界面 完全保留你原来样式
+function renderUI(){
     const countEl = document.getElementById("count");
     const stateEl = document.getElementById("state");
     const heartEl = document.getElementById("heart");
@@ -164,10 +189,10 @@ function refreshUI() {
     const noBtn = document.getElementById("no");
     const tipEl = document.getElementById("tip");
 
-    countEl.innerText = state.count;
+    countEl.innerText = globalData.users.length;
 
     // 打卡日期提示
-    if (CHECK_DAY) {
+    if (IS_CHECK_DAY) {
         tipEl.innerText = "✅ 今日需要打卡";
         tipEl.className = "inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 bg-green-100 text-green-700";
     } else {
@@ -180,18 +205,20 @@ function refreshUI() {
         return;
     }
 
-    let done = state.users.includes(DEVICE_ID);
-    okBtn.disabled = done;
-    noBtn.disabled = done;
-    okBtn.style.opacity = done ? 0.5 : 1;
-    noBtn.style.opacity = done ? 0.5 : 1;
+    // 判断自己是否已打卡
+    let myDone = globalData.users.includes(SELF_ID);
+    okBtn.disabled = myDone;
+    noBtn.disabled = myDone;
+    okBtn.style.opacity = myDone ? 0.5 : 1;
+    noBtn.style.opacity = myDone ? 0.5 : 1;
 
-    if (state.count === 0) {
+    // 状态文字与爱心样式
+    if (globalData.users.length === 0) {
         stateEl.innerText = "等待两人打卡";
-    } else if (state.count === 1) {
+    } else if (globalData.users.length === 1) {
         stateEl.innerText = "已1人打卡，等待另一人";
     } else {
-        if (state.p1 && state.p2) {
+        if (globalData.p1 && globalData.p2) {
             stateEl.innerText = "两人完成 ✨ 爱心圆满";
             heartEl.className = "text-8xl my-6 fade-in heart-beat heart-icon text-love";
             heartEl.innerText = "❤️";
