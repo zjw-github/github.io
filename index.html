@@ -13,15 +13,11 @@
         }
         @keyframes heartShake {
             0%,100% { transform: rotate(0); }
-            25% { transform: rotate(-4deg); }
-            75% { transform: rotate(4deg); }
+            25% { transform: rotate(-5deg); }
+            75% { transform: rotate(5deg); }
         }
-        .heart-beat {
-            animation: heartBeat 1.2s infinite !important;
-        }
-        .heart-shake {
-            animation: heartShake 2s infinite !important;
-        }
+        .heart-beat { animation: heartBeat 1.2s infinite; }
+        .heart-shake { animation: heartShake 2s infinite; }
     </style>
 </head>
 <body class="bg-pink-50 min-h-screen flex flex-col items-center p-4">
@@ -36,77 +32,84 @@
     <p class="text-gray-600 mt-1">已打卡 <span id="count">0</span>/2</p>
 
     <div class="flex gap-4 justify-center mt-6">
-        <button id="btnOk" onclick="doCheck(true)" class="bg-green-500 text-white px-6 py-3 rounded-full">✅ 完成</button>
-        <button id="btnNo" onclick="doCheck(false)" class="bg-red-500 text-white px-6 py-3 rounded-full">❌ 缺席</button>
+        <button id="btnOk" onclick="submit(true)" class="bg-green-500 text-white px-6 py-3 rounded-full">✅ 完成</button>
+        <button id="btnNo" onclick="submit(false)" class="bg-red-500 text-white px-6 py-3 rounded-full">❌ 缺席</button>
     </div>
 </div>
 
 <script>
-// ===================== 日期（每天自动刷新）=====================
+// ===================== 自动每日重置 =====================
 const now = new Date();
-const TODAY = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}`;
-const STORAGE_KEY = "LOVE_"+TODAY;
-const DEVICE_KEY = "DEVICE_"+TODAY;
+const TODAY = `${now.getFullYear()}${now.getMonth()+1}${now.getDate()}`;
+const DEVICE_ID = localStorage.getItem("DEVICE_ID") || Math.random().toString(36);
+localStorage.setItem("DEVICE_ID", DEVICE_ID);
 
-// 加载今日数据
-let data = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
-    count: 0,
-    c1: null,
-    c2: null
-};
-let myDone = localStorage.getItem(DEVICE_KEY);
+const API = "https://api.jsonbin.io/v3/b/6608f0a3ad19ca34f8645677";
+const HEADERS = { "X-Master-Key": "$2b$10$uy0A5QlS5Xat0EuH5d5sreQ0XQlLFzfqRsfGDmGdN9lwfE5U5a5Cq" };
 
-// 初始化显示
+let state = { count:0, p1:null, p2:null, devices:[] };
+let mySubmitted = false;
+
+// 初始化
+loadState();
 document.getElementById("today").innerText = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
-refresh();
 
-// ===================== 打卡 =====================
-function doCheck(ok) {
-    if (myDone) {
-        alert("你今天已经打过卡啦！");
-        return;
-    }
-    myDone = "1";
-    localStorage.setItem(DEVICE_KEY, "1");
-    data.count++;
-    if (data.count === 1) data.c1 = ok;
-    if (data.count === 2) data.c2 = ok;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    refresh();
+// 读取云端状态
+async function loadState() {
+    let res = await fetch(API);
+    let data = await res.json();
+    state = data.record[TODAY] || { count:0, p1:null, p2:null, devices:[] };
+    mySubmitted = state.devices.includes(DEVICE_ID);
+    refreshUI();
 }
 
-// ===================== 刷新界面 =====================
-function refresh() {
-    const count = document.getElementById("count");
-    const status = document.getElementById("status");
-    const heart = document.getElementById("heart");
+// 提交打卡
+async function submit(ok) {
+    if (mySubmitted) { alert("你已经打过卡啦！"); return; }
+    mySubmitted = true;
+    state.devices.push(DEVICE_ID);
+    state.count++;
+    if (state.count === 1) state.p1 = ok;
+    if (state.count === 2) state.p2 = ok;
+
+    await fetch(API, {
+        method: "PUT",
+        headers: HEADERS,
+        body: JSON.stringify({ [TODAY]: state })
+    });
+    refreshUI();
+}
+
+// 刷新界面
+function refreshUI() {
+    const countEl = document.getElementById("count");
+    const statusEl = document.getElementById("status");
+    const heartEl = document.getElementById("heart");
     const btnOk = document.getElementById("btnOk");
     const btnNo = document.getElementById("btnNo");
 
-    count.innerText = data.count;
+    countEl.innerText = state.count;
 
-    // 按钮禁用
-    if (myDone) {
+    if (mySubmitted) {
         btnOk.disabled = true;
         btnNo.disabled = true;
-        btnOk.style.opacity = "0.5";
-        btnNo.style.opacity = "0.5";
+        btnOk.style.opacity = 0.5;
+        btnNo.style.opacity = 0.5;
     }
 
-    // 状态逻辑（你要的规则：必须两人都✅才不碎）
-    if (data.count === 0) {
-        status.innerText = "等待两人打卡";
-    } else if (data.count === 1) {
-        status.innerText = "已1人打卡，等待另一人";
+    if (state.count === 0) {
+        statusEl.innerText = "等待两人打卡";
+    } else if (state.count === 1) {
+        statusEl.innerText = "已1人打卡，等待另一人";
     } else {
-        if (data.c1 && data.c2) {
-            status.innerText = "两人都完成 ✨ 爱心圆满";
-            heart.className = "text-7xl my-6 heart-beat text-pink-500";
-            heart.innerText = "❤️";
+        if (state.p1 && state.p2) {
+            statusEl.innerText = "两人完成 ✅ 爱心圆满";
+            heartEl.className = "text-7xl my-6 heart-beat text-pink-500";
+            heartEl.innerText = "❤️";
         } else {
-            status.innerText = "爱心破碎 💔 有人缺席";
-            heart.className = "text-7xl my-6 heart-shake text-gray-400";
-            heart.innerText = "💔";
+            statusEl.innerText = "爱心破碎 💔 有人缺席";
+            heartEl.className = "text-7xl my-6 heart-shake text-gray-400";
+            heartEl.innerText = "💔";
         }
     }
 }
