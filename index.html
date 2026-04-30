@@ -3,22 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>双人爱心日历打卡</title>
+    <title>双人爱心打卡</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
-    <script>
-        tailwind.config = {
-            theme: { 
-                extend: { 
-                    colors: { 
-                        love: '#ff4d6d',
-                        loveLight: '#ff758f',
-                        loveBroken: '#6b7280'
-                    } 
-                }
-            }
-        }
-    </script>
     <style>
         @keyframes heartBeat {
             0% { transform: scale(1); }
@@ -26,150 +12,104 @@
             100% { transform: scale(1); }
         }
         @keyframes heartShake {
-            0%,100% { transform: rotate(0deg); }
+            0%,100% { transform: rotate(0); }
             25% { transform: rotate(-4deg); }
-            75% { transform: rotate(5deg); }
+            75% { transform: rotate(4deg); }
         }
         .heart-beat {
-            animation: heartBeat 1.2s ease-in-out infinite !important;
+            animation: heartBeat 1.2s infinite !important;
         }
         .heart-shake {
-            animation: heartShake 2s ease-in-out infinite !important;
-        }
-        .fade-in { 
-            animation: fadeIn 0.8s ease-out; 
-        }
-        @keyframes fadeIn {
-            0% { opacity: 0; transform: scale(0.8); }
-            100% { opacity: 1; transform: scale(1); }
-        }
-        .heart-icon{
-            text-shadow: 0 0 25px #ff4d6d70;
-        }
-        .calendar-day{
-            width: 42px;
-            height: 42px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            border-radius:12px;
-            font-size:18px;
+            animation: heartShake 2s infinite !important;
         }
     </style>
 </head>
-<body class="bg-gradient-to-br from-pink-100 via-rose-50 to-pink-100 min-h-screen p-4 flex flex-col items-center">
+<body class="bg-pink-50 min-h-screen flex flex-col items-center p-4">
 
-<!-- 密码弹窗 -->
-<div id="login" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-    <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-        <h2 class="text-lg font-bold text-center mb-3 text-love">🔒 请输入专属密码</h2>
-        <input id="pwd" type="password" placeholder="请输入密码" class="w-full border border-pink-200 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-love">
-        <button onclick="login()" class="w-full bg-love text-white py-2 rounded-lg font-bold hover:bg-loveLight transition">进入打卡页</button>
-    </div>
-</div>
+<div id="app" class="max-w-sm w-full text-center pt-6">
+    <h1 class="text-xl font-bold text-pink-500">💘 双人爱心打卡</h1>
+    <p id="today" class="text-gray-500 text-sm mt-1"></p>
+    <p class="mt-2 text-sm text-green-600">✅ 今日可打卡</p>
 
-<!-- 主界面 -->
-<div id="app" class="hidden w-full max-w-sm text-center">
-    <h1 class="text-2xl font-bold text-love mb-1">💘 双人爱心日历打卡 💘</h1>
-    <p id="today" class="text-gray-500 mb-2"></p>
-    <p id="tip" class="inline-block px-3 py-1 rounded-full text-sm font-medium mb-4"></p>
+    <div id="heart" class="text-7xl my-6 heart-beat text-pink-500">❤️</div>
+    <p id="status" class="text-lg">等待两人打卡</p>
+    <p class="text-gray-600 mt-1">已打卡 <span id="count">0</span>/2</p>
 
-    <div id="heart" class="text-8xl my-6 fade-in heart-beat heart-icon text-love">❤️</div>
-    <p id="state" class="text-lg font-medium text-gray-700">等待两人打卡</p>
-    <p class="text-gray-600 mb-4">已打卡 <span id="count">0</span>/2</p>
-
-    <div class="flex gap-3 justify-center mb-6">
-        <button id="ok" onclick="go(true)" class="bg-green-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-green-400 transition">✅ 完成</button>
-        <button id="no" onclick="go(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
-    </div>
-
-    <!-- 日历 -->
-    <div class="w-full bg-white/80 rounded-xl p-3 shadow mb-6">
-        <h3 class="font-bold text-love mb-3">📅 打卡日历（4.30起）</h3>
-        <div id="calendarBox" class="grid grid-cols-6 gap-2 justify-items-center"></div>
+    <div class="flex gap-4 justify-center mt-6">
+        <button id="btnOk" onclick="doCheck(true)" class="bg-green-500 text-white px-6 py-3 rounded-full">✅ 完成</button>
+        <button id="btnNo" onclick="doCheck(false)" class="bg-red-500 text-white px-6 py-3 rounded-full">❌ 缺席</button>
     </div>
 </div>
 
 <script>
-// ===================== 配置 =====================
-const PASSWORD = "123456";
+// ===================== 日期（每天自动刷新）=====================
 const now = new Date();
-const y = now.getFullYear(), m = now.getMonth()+1, d = now.getDate();
-const DAY_KEY = `${y}-${m}-${d}`;
-const CAN_SIGN = true; // 今天可打卡
+const TODAY = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}`;
+const STORAGE_KEY = "LOVE_"+TODAY;
+const DEVICE_KEY = "DEVICE_"+TODAY;
 
-document.getElementById("today").innerText = `${y}年${m}月${d}日`;
-
-// ===================== 全局状态 =====================
-let mySigned = localStorage.getItem("MY_SIGN_" + DAY_KEY);
-let signData = JSON.parse(localStorage.getItem("SIGN_DATA_" + DAY_KEY)) || {
-  count: 0,
-  a: null,
-  b: null
+// 加载今日数据
+let data = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
+    count: 0,
+    c1: null,
+    c2: null
 };
+let myDone = localStorage.getItem(DEVICE_KEY);
 
-// ===================== 登录 =====================
-function login() {
-  if (document.getElementById("pwd").value === PASSWORD) {
-    document.getElementById("login").classList.add("hidden");
-    document.getElementById("app").classList.remove("hidden");
-    refreshUI();
-  } else alert("密码错误");
-}
+// 初始化显示
+document.getElementById("today").innerText = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
+refresh();
 
-// ===================== 打卡（真正正确的逻辑） =====================
-function go(ok) {
-  if (mySigned) {
-    alert("你已经打过卡啦，不能重复提交！");
-    return;
-  }
-
-  // 同一个设备只允许算 1 次
-  mySigned = "1";
-  localStorage.setItem("MY_SIGN_" + DAY_KEY, "1");
-
-  // 只有两个人才算 2
-  if (signData.count === 0) {
-    signData.a = ok;
-    signData.count = 1;
-  } else if (signData.count === 1) {
-    signData.b = ok;
-    signData.count = 2;
-  }
-
-  localStorage.setItem("SIGN_DATA_" + DAY_KEY, JSON.stringify(signData));
-  refreshUI();
+// ===================== 打卡 =====================
+function doCheck(ok) {
+    if (myDone) {
+        alert("你今天已经打过卡啦！");
+        return;
+    }
+    myDone = "1";
+    localStorage.setItem(DEVICE_KEY, "1");
+    data.count++;
+    if (data.count === 1) data.c1 = ok;
+    if (data.count === 2) data.c2 = ok;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    refresh();
 }
 
 // ===================== 刷新界面 =====================
-function refreshUI() {
-  const countEl = document.getElementById("count");
-  const stateEl = document.getElementById("state");
-  const okBtn = document.getElementById("ok");
-  const noBtn = document.getElementById("no");
-  const heart = document.getElementById("heart");
+function refresh() {
+    const count = document.getElementById("count");
+    const status = document.getElementById("status");
+    const heart = document.getElementById("heart");
+    const btnOk = document.getElementById("btnOk");
+    const btnNo = document.getElementById("btnNo");
 
-  // 更新已打卡数字
-  countEl.innerText = signData.count;
+    count.innerText = data.count;
 
-  // 按钮禁用
-  if (mySigned) {
-    okBtn.disabled = true;
-    noBtn.disabled = true;
-  }
+    // 按钮禁用
+    if (myDone) {
+        btnOk.disabled = true;
+        btnNo.disabled = true;
+        btnOk.style.opacity = "0.5";
+        btnNo.style.opacity = "0.5";
+    }
 
-  // 状态文字
-  if (signData.count === 0) {
-    stateEl.innerText = "等待两人打卡";
-  } else if (signData.count === 1) {
-    stateEl.innerText = "已 1 人打卡，等待另一人";
-  } else {
-    stateEl.innerText = "两人全部打卡完成 ✨";
-  }
+    // 状态逻辑（你要的规则：必须两人都✅才不碎）
+    if (data.count === 0) {
+        status.innerText = "等待两人打卡";
+    } else if (data.count === 1) {
+        status.innerText = "已1人打卡，等待另一人";
+    } else {
+        if (data.c1 && data.c2) {
+            status.innerText = "两人都完成 ✨ 爱心圆满";
+            heart.className = "text-7xl my-6 heart-beat text-pink-500";
+            heart.innerText = "❤️";
+        } else {
+            status.innerText = "爱心破碎 💔 有人缺席";
+            heart.className = "text-7xl my-6 heart-shake text-gray-400";
+            heart.innerText = "💔";
+        }
+    }
 }
-
-// 初始化
-refreshUI();
 </script>
 </body>
 </html>
