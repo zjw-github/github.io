@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>双人爱心日历打卡</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
     <script>
         tailwind.config = {
             theme: { 
@@ -63,7 +62,6 @@
         <button id="no" onclick="go(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
     </div>
 
-    <!-- ✅ 这里换成好看的打卡记录列表 -->
     <div class="w-full bg-white/80 rounded-xl p-4 shadow-md text-left mt-2">
         <h3 class="font-bold text-love mb-3">📜 打卡记录</h3>
         <div id="recordList" class="space-y-2 text-sm text-gray-700">
@@ -78,7 +76,6 @@ const PASSWORD = "123456";
 const now = new Date();
 const Y = now.getFullYear(), M = now.getMonth()+1, D = now.getDate();
 const TODAY = `${Y}${M}${D}`;
-const DAY_KEY = `${Y}-${M}-${D}`;
 const DEVICE_ID = localStorage.getItem("DEVICE_ID") || Math.random().toString(36);
 localStorage.setItem("DEVICE_ID", DEVICE_ID);
 
@@ -90,13 +87,14 @@ const HEADERS = {
 
 let state = { count:0, p1:null, p2:null, devices:[] };
 let myDone = false;
+let isSubmitting = false;
 
 // 初始化
 document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
 loadState();
-setInterval(loadState, 2000); // 自动同步 2秒刷新
+setInterval(loadState, 1500); // 自动同步
 
-// 读取状态
+// 读取最新状态
 async function loadState() {
     try {
         const res = await fetch(API);
@@ -105,7 +103,7 @@ async function loadState() {
         state = todayData;
         myDone = state.devices.includes(DEVICE_ID);
         refreshUI();
-    } catch(e) {}
+    } catch (e) {}
 }
 
 // 登录
@@ -117,30 +115,42 @@ function login() {
     } else alert("密码错误");
 }
 
-// 打卡
+// 打卡（终极修复版）
 async function go(ok) {
+    if (isSubmitting) return;
     if (myDone) { alert("你已打卡"); return; }
-    
-    myDone = true;
-    state.devices.push(DEVICE_ID);
-    state.count++;
-    
-    if (state.count === 1) state.p1 = ok;
-    if (state.count === 2) state.p2 = ok;
 
-    refreshUI();
-    refreshRecord();
+    isSubmitting = true;
+    try {
+        // 先从云端拉取最新数据（最关键修复）
+        const fullRes = await fetch(API);
+        const fullData = await fullRes.json();
+        const latest = fullData.record[TODAY] || { count:0, p1:null, p2:null, devices:[] };
 
-    // 完整覆盖云端数据，修复同步错乱
-    const fullRes = await fetch(API);
-    const fullData = await fullRes.json();
-    fullData.record[TODAY] = state;
+        // 基于最新状态修改
+        if (latest.devices.includes(DEVICE_ID)) {
+            alert("你已打卡");
+            isSubmitting = false;
+            return;
+        }
 
-    await fetch(API, {
-        method: "PUT",
-        headers: HEADERS,
-        body: JSON.stringify(fullData.record)
-    });
+        latest.devices.push(DEVICE_ID);
+        latest.count++;
+        if (latest.count === 1) latest.p1 = ok;
+        if (latest.count === 2) latest.p2 = ok;
+
+        // 提交
+        fullData.record[TODAY] = latest;
+        await fetch(API, { method:"PUT", headers:HEADERS, body:JSON.stringify(fullData.record) });
+
+        // 本地更新
+        state = latest;
+        myDone = true;
+        refreshUI();
+        refreshRecord();
+    } finally {
+        isSubmitting = false;
+    }
 }
 
 // 刷新界面
@@ -185,7 +195,7 @@ function refreshUI() {
     }
 }
 
-// ✅ 好看的打卡记录
+// 打卡记录
 function refreshRecord() {
     const list = document.getElementById("recordList");
     const result = (state.p1 && state.p2) ? "✅ 圆满" : "💔 破碎";
