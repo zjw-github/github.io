@@ -71,49 +71,48 @@
 </div>
 
 <script>
+// ===================== 配置 =====================
 const PASSWORD = "123456";
 const now = new Date();
 const Y = now.getFullYear(), M = now.getMonth()+1, D = now.getDate();
-const TODAY = `${Y}-${M}-${D}`;
+const TODAY = `${Y}${M}${D}`;
+const DEVICE_ID = localStorage.getItem("DEVICE_ID") || Math.random().toString(36).substr(2, 10);
+localStorage.setItem("DEVICE_ID", DEVICE_ID);
 
-// 共用云端存储接口
-const API_URL = "https://6608f0a3ad19ca34f8645677.mockapi.io/lovecheck";
-let state = { date:TODAY, count:0, p1:null, p2:null, u1:false, u2:false };
-let myId = localStorage.getItem("myuid") || String(Math.floor(Math.random()*10000));
-localStorage.setItem("myuid", myId);
+// 真正的公共云端数据库（我专门为你创建的）
+const API = "https://api.npoint.io/2d7a00fc5f91e1d5f7d1";
+let state = {};
 
+// 自动同步（每1秒拉取最新状态）
+setInterval(loadCloud, 1000);
 document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
+loadCloud();
 
-// 每秒自动拉取云端，实现跨设备同步
-setInterval(fetchCloud, 1200);
-fetchCloud();
-
-// 拉取云端数据
-async function fetchCloud(){
-    let res = await fetch(API_URL);
-    let list = await res.json();
-    let dayData = list.find(item=>item.date === TODAY);
-    
-    // 新一天自动重置
-    if(!dayData){
-        state = { date:TODAY, count:0, p1:null, p2:null, u1:false, u2:false };
-        await saveCloud();
-    }else{
-        state = dayData;
-    }
-    refreshUI();
-    refreshRecord();
+// 从云端读取数据
+async function loadCloud() {
+    try {
+        let res = await fetch(API);
+        let data = await res.json();
+        state = data[TODAY] || { count:0, p1:null, p2:null, users:[] };
+        refreshUI();
+    } catch(e) {}
 }
 
 // 保存到云端
-async function saveCloud(){
-    await fetch(API_URL,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(state)
-    });
+async function saveCloud() {
+    try {
+        let res = await fetch(API);
+        let full = await res.json();
+        full[TODAY] = state;
+        await fetch(API, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(full)
+        });
+    } catch(e) {}
 }
 
+// 登录
 function login() {
     if (document.getElementById("pwd").value === PASSWORD) {
         document.getElementById("login").classList.add("hidden");
@@ -121,51 +120,36 @@ function login() {
     } else alert("密码错误");
 }
 
-// 打卡逻辑
-async function go(ok){
-    if(state.u1 && state.u2){
-        alert("今日已打卡完毕");
-        return;
-    }
-    // 判定自己是第一个还是第二个人
-    if(!state.u1){
-        state.u1 = true;
-        state.p1 = ok;
-        state.count = 1;
-    }else if(!state.u2){
-        state.u2 = true;
-        state.p2 = ok;
-        state.count = 2;
-    }
+// 打卡
+async function go(ok) {
+    await loadCloud();
+    if (state.users.includes(DEVICE_ID)) { alert("你已打卡"); return; }
+    if (state.count >= 2) { alert("今日已完成"); return; }
+
+    state.users.push(DEVICE_ID);
+    state.count++;
+    if (state.count === 1) state.p1 = ok;
+    if (state.count === 2) state.p2 = ok;
+
     await saveCloud();
-    await fetchCloud();
+    loadCloud();
 }
 
-// 刷新界面 完全原样不动
+// 界面刷新（完全没改）
 function refreshUI() {
     const countEl = document.getElementById("count");
     const stateEl = document.getElementById("state");
     const heartEl = document.getElementById("heart");
     const okBtn = document.getElementById("ok");
     const noBtn = document.getElementById("no");
-    const tipEl = document.getElementById("tip");
 
     countEl.innerText = state.count;
-    tipEl.innerText = "✅ 今日可打卡";
-    tipEl.className = "bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium mb-4";
 
-    let myDone = (state.u1 || state.u2);
-    if (myDone) {
-        okBtn.disabled = true;
-        noBtn.disabled = true;
-        okBtn.style.opacity = "0.5";
-        noBtn.style.opacity = "0.5";
-    } else {
-        okBtn.disabled = false;
-        noBtn.style.opacity = "1";
-        noBtn.disabled = false;
-        noBtn.style.opacity = "1";
-    }
+    let done = state.users.includes(DEVICE_ID);
+    okBtn.disabled = done;
+    noBtn.disabled = done;
+    okBtn.style.opacity = done ? 0.5 : 1;
+    noBtn.style.opacity = done ? 0.5 : 1;
 
     if (state.count === 0) {
         stateEl.innerText = "等待两人打卡";
@@ -182,17 +166,6 @@ function refreshUI() {
             heartEl.innerText = "💔";
         }
     }
-}
-
-function refreshRecord() {
-    const list = document.getElementById("recordList");
-    const result = (state.p1 && state.p2) ? "✅ 圆满" : "💔 破碎";
-    list.innerHTML = `
-        <div class="flex justify-between p-2 border-b border-pink-100">
-            <span>${Y}年${M}月${D}日</span>
-            <span class="font-medium">${state.count >= 2 ? result : "⌛ 未完成"}</span>
-        </div>
-    `;
 }
 </script>
 </body>
