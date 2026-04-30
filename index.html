@@ -43,7 +43,7 @@
 <div id="login" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
     <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
         <h2 class="text-lg font-bold text-center mb-3 text-love">🔒 请输入专属密码</h2>
-        <input id="pwd" type="password" placeholder="请输入密码" class="w-full border border-pink-200 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-love">
+        <input id="pwd" type="password" placeholder="请输入密码" class="w-full border border-pink-20 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-love">
         <button onclick="login()" class="w-full bg-love text-white py-2 rounded-lg font-bold hover:bg-loveLight transition">进入</button>
     </div>
 </div>
@@ -94,15 +94,18 @@ let myDone = false;
 // 初始化
 document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
 loadState();
+setInterval(loadState, 2000); // 自动同步 2秒刷新
 
 // 读取状态
 async function loadState() {
-    const res = await fetch(API);
-    const data = await res.json();
-    const todayData = data.record[TODAY] || { count:0, p1:null, p2:null, devices:[] };
-    state = todayData;
-    myDone = state.devices.includes(DEVICE_ID);
-    refreshUI();
+    try {
+        const res = await fetch(API);
+        const data = await res.json();
+        const todayData = data.record[TODAY] || { count:0, p1:null, p2:null, devices:[] };
+        state = todayData;
+        myDone = state.devices.includes(DEVICE_ID);
+        refreshUI();
+    } catch(e) {}
 }
 
 // 登录
@@ -117,16 +120,27 @@ function login() {
 // 打卡
 async function go(ok) {
     if (myDone) { alert("你已打卡"); return; }
+    
     myDone = true;
     state.devices.push(DEVICE_ID);
     state.count++;
+    
     if (state.count === 1) state.p1 = ok;
     if (state.count === 2) state.p2 = ok;
 
     refreshUI();
     refreshRecord();
 
-    await fetch(API, { method:"PUT", headers:HEADERS, body:JSON.stringify({ [TODAY]: state }) });
+    // 完整覆盖云端数据，修复同步错乱
+    const fullRes = await fetch(API);
+    const fullData = await fullRes.json();
+    fullData.record[TODAY] = state;
+
+    await fetch(API, {
+        method: "PUT",
+        headers: HEADERS,
+        body: JSON.stringify(fullData.record)
+    });
 }
 
 // 刷新界面
@@ -147,6 +161,11 @@ function refreshUI() {
         noBtn.disabled = true;
         okBtn.style.opacity = "0.5";
         noBtn.style.opacity = "0.5";
+    } else {
+        okBtn.disabled = false;
+        noBtn.disabled = false;
+        okBtn.style.opacity = "1";
+        noBtn.style.opacity = "1";
     }
 
     if (state.count === 0) {
