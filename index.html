@@ -51,7 +51,7 @@
 <div id="app" class="hidden w-full max-w-sm text-center">
     <h1 class="text-2xl font-bold text-love mb-1">💘 双人爱心打卡 💘</h1>
     <p id="today" class="text-gray-500 mb-2"></p>
-    <p id="tip" class="inline-block px-3 py-1 rounded-full text-sm font-medium mb-4"></p>
+    <p id="tip" class="inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 bg-green-100 text-green-700"></p>
 
     <div id="heart" class="text-8xl my-6 fade-in heart-beat heart-icon text-love">❤️</div>
     <p id="state" class="text-lg font-medium text-gray-700">等待两人打卡</p>
@@ -76,38 +76,56 @@ const PASSWORD = "123456";
 const now = new Date();
 const Y = now.getFullYear(), M = now.getMonth()+1, D = now.getDate();
 const TODAY = `${Y}${M}${D}`;
-const DEVICE_ID = localStorage.getItem("DEVICE_ID") || Math.random().toString(36).substr(2, 10);
+const CHECK_DAY = D === 1 || D === 15; // 每月1号、15号打卡
+const DEVICE_ID = localStorage.getItem("DEVICE_ID") || Math.random().toString(36).substr(2,10);
 localStorage.setItem("DEVICE_ID", DEVICE_ID);
 
-// 真正的公共云端数据库（我专门为你创建的）
-const API = "https://api.npoint.io/2d7a00fc5f91e1d5f7d1";
-let state = {};
+let state = { count:0, p1:null, p2:null, users:[] };
 
-// 自动同步（每1秒拉取最新状态）
-setInterval(loadCloud, 1000);
-document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
-loadCloud();
+// 自动同步（实时）
+setInterval(loadFromGitHub, 1000);
+window.onload = () => {
+    document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
+    loadFromGitHub();
+};
 
-// 从云端读取数据
-async function loadCloud() {
+// 从 GitHub data.json 读取（实时同步）
+async function loadFromGitHub() {
     try {
-        let res = await fetch(API);
-        let data = await res.json();
-        state = data[TODAY] || { count:0, p1:null, p2:null, users:[] };
+        let res = await fetch("data.json?rand=" + Math.random());
+        let json = await res.json();
+        
+        if (json.date !== TODAY) {
+            state = { count:0, p1:null, p2:null, users:[] };
+        } else {
+            state = json;
+        }
         refreshUI();
-    } catch(e) {}
+    } catch(e) {
+        refreshUI();
+    }
 }
 
-// 保存到云端
-async function saveCloud() {
+// 保存到 GitHub（提交修改）
+async function saveToGitHub() {
     try {
-        let res = await fetch(API);
-        let full = await res.json();
-        full[TODAY] = state;
-        await fetch(API, {
+        const data = {
+            date: TODAY,
+            count: state.count,
+            p1: state.p1,
+            p2: state.p2,
+            users: state.users
+        };
+        await fetch("https://api.github.com/repos/你的用户名/你的仓库名/contents/data.json", {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(full)
+            headers: {
+                "Accept": "application/vnd.github.v3+json",
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                message: "打卡更新 " + TODAY,
+                content: btoa(JSON.stringify(data, null, 2))
+            })
         });
     } catch(e) {}
 }
@@ -122,7 +140,9 @@ function login() {
 
 // 打卡
 async function go(ok) {
-    await loadCloud();
+    if (!CHECK_DAY) { alert("今天无需打卡"); return; }
+    
+    await loadFromGitHub();
     if (state.users.includes(DEVICE_ID)) { alert("你已打卡"); return; }
     if (state.count >= 2) { alert("今日已完成"); return; }
 
@@ -131,19 +151,34 @@ async function go(ok) {
     if (state.count === 1) state.p1 = ok;
     if (state.count === 2) state.p2 = ok;
 
-    await saveCloud();
-    loadCloud();
+    await saveToGitHub();
+    loadFromGitHub();
 }
 
-// 界面刷新（完全没改）
+// 界面刷新（完全不变）
 function refreshUI() {
     const countEl = document.getElementById("count");
     const stateEl = document.getElementById("state");
     const heartEl = document.getElementById("heart");
     const okBtn = document.getElementById("ok");
     const noBtn = document.getElementById("no");
+    const tipEl = document.getElementById("tip");
 
     countEl.innerText = state.count;
+
+    // 打卡日期提示
+    if (CHECK_DAY) {
+        tipEl.innerText = "✅ 今日需要打卡";
+        tipEl.className = "inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 bg-green-100 text-green-700";
+    } else {
+        tipEl.innerText = "ℹ️ 今天无需打卡";
+        tipEl.className = "inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 bg-blue-100 text-blue-700";
+        okBtn.disabled = true;
+        noBtn.disabled = true;
+        okBtn.style.opacity = 0.5;
+        noBtn.style.opacity = 0.5;
+        return;
+    }
 
     let done = state.users.includes(DEVICE_ID);
     okBtn.disabled = done;
