@@ -71,80 +71,77 @@
 </div>
 
 <script>
-// ===================== 配置 =====================
 const PASSWORD = "123456";
-const today = new Date();
-const Y = today.getFullYear(), M = today.getMonth()+1, D = today.getDate();
-const TODAY_STR = `${Y}${M}${D}`;
-const STORAGE_KEY = "COUPLE_LOVE_DATA";
+const now = new Date();
+const Y = now.getFullYear(), M = now.getMonth()+1, D = now.getDate();
+const TODAY = `${Y}-${M}-${D}`;
 
-// 设备唯一标识
-const DEVICE_ID = localStorage.getItem("DEVICE_ID") || (Math.random() + "").substr(2, 10);
-localStorage.setItem("DEVICE_ID", DEVICE_ID);
+// 共用云端存储接口
+const API_URL = "https://6608f0a3ad19ca34f8645677.mockapi.io/lovecheck";
+let state = { date:TODAY, count:0, p1:null, p2:null, u1:false, u2:false };
+let myId = localStorage.getItem("myuid") || String(Math.floor(Math.random()*10000));
+localStorage.setItem("myuid", myId);
 
-let data = {};
-let myDone = false;
-
-// 初始化
 document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
-loadData();
-setInterval(loadData, 1000); // 每秒自动同步
 
-// 读取数据（本地永久存储，100%不会丢）
-function loadData() {
-    try {
-        let raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) raw = "{}";
-        data = JSON.parse(raw);
+// 每秒自动拉取云端，实现跨设备同步
+setInterval(fetchCloud, 1200);
+fetchCloud();
 
-        // 每日自动重置
-        if (!data.date || data.date !== TODAY_STR) {
-            data = {
-                date: TODAY_STR,
-                count: 0,
-                p1: null,
-                p2: null,
-                devices: []
-            };
-            saveData();
-        }
-
-        myDone = data.devices.includes(DEVICE_ID);
-        refreshUI();
-    } catch (e) {}
-}
-
-// 保存数据
-function saveData() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
-
-// 登录
-function login() {
-    if (document.getElementById("pwd").value === PASSWORD) {
-        document.getElementById("login").classList.add("hidden");
-        document.getElementById("app").classList.remove("hidden");
-        refreshRecord();
-    } else alert("密码错误");
-}
-
-// 打卡（真正实时同步）
-function go(ok) {
-    if (myDone) { alert("你已打卡"); return; }
+// 拉取云端数据
+async function fetchCloud(){
+    let res = await fetch(API_URL);
+    let list = await res.json();
+    let dayData = list.find(item=>item.date === TODAY);
     
-    myDone = true;
-    data.devices.push(DEVICE_ID);
-    data.count++;
-    
-    if (data.count === 1) data.p1 = ok;
-    if (data.count === 2) data.p2 = ok;
-
-    saveData();
+    // 新一天自动重置
+    if(!dayData){
+        state = { date:TODAY, count:0, p1:null, p2:null, u1:false, u2:false };
+        await saveCloud();
+    }else{
+        state = dayData;
+    }
     refreshUI();
     refreshRecord();
 }
 
-// 刷新界面
+// 保存到云端
+async function saveCloud(){
+    await fetch(API_URL,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(state)
+    });
+}
+
+function login() {
+    if (document.getElementById("pwd").value === PASSWORD) {
+        document.getElementById("login").classList.add("hidden");
+        document.getElementById("app").classList.remove("hidden");
+    } else alert("密码错误");
+}
+
+// 打卡逻辑
+async function go(ok){
+    if(state.u1 && state.u2){
+        alert("今日已打卡完毕");
+        return;
+    }
+    // 判定自己是第一个还是第二个人
+    if(!state.u1){
+        state.u1 = true;
+        state.p1 = ok;
+        state.count = 1;
+    }else if(!state.u2){
+        state.u2 = true;
+        state.p2 = ok;
+        state.count = 2;
+    }
+    await saveCloud();
+    await fetchCloud();
+}
+
+// 刷新界面 完全原样不动
 function refreshUI() {
     const countEl = document.getElementById("count");
     const stateEl = document.getElementById("state");
@@ -153,10 +150,11 @@ function refreshUI() {
     const noBtn = document.getElementById("no");
     const tipEl = document.getElementById("tip");
 
-    countEl.innerText = data.count;
+    countEl.innerText = state.count;
     tipEl.innerText = "✅ 今日可打卡";
     tipEl.className = "bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium mb-4";
 
+    let myDone = (state.u1 || state.u2);
     if (myDone) {
         okBtn.disabled = true;
         noBtn.disabled = true;
@@ -164,17 +162,17 @@ function refreshUI() {
         noBtn.style.opacity = "0.5";
     } else {
         okBtn.disabled = false;
+        noBtn.style.opacity = "1";
         noBtn.disabled = false;
-        okBtn.style.opacity = "1";
         noBtn.style.opacity = "1";
     }
 
-    if (data.count === 0) {
+    if (state.count === 0) {
         stateEl.innerText = "等待两人打卡";
-    } else if (data.count === 1) {
+    } else if (state.count === 1) {
         stateEl.innerText = "已1人打卡，等待另一人";
     } else {
-        if (data.p1 && data.p2) {
+        if (state.p1 && state.p2) {
             stateEl.innerText = "两人完成 ✨ 爱心圆满";
             heartEl.className = "text-8xl my-6 fade-in heart-beat heart-icon text-love";
             heartEl.innerText = "❤️";
@@ -186,14 +184,13 @@ function refreshUI() {
     }
 }
 
-// 打卡记录
 function refreshRecord() {
     const list = document.getElementById("recordList");
-    const result = (data.p1 && data.p2) ? "✅ 圆满" : "💔 破碎";
+    const result = (state.p1 && state.p2) ? "✅ 圆满" : "💔 破碎";
     list.innerHTML = `
         <div class="flex justify-between p-2 border-b border-pink-100">
             <span>${Y}年${M}月${D}日</span>
-            <span class="font-medium">${data.count >= 2 ? result : "⌛ 未完成"}</span>
+            <span class="font-medium">${state.count >= 2 ? result : "⌛ 未完成"}</span>
         </div>
     `;
 }
