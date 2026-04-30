@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>双人爱心日历打卡</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: { 
+                extend: { 
+                    colors: { 
+                        love: '#ff4d6d',
+                        loveLight: '#ff758f',
+                        loveBroken: '#6b7280'
+                    } 
+                } 
+            }
+        }
+    </script>
+    <style>
+        /* 修复：强制生效的爱心跳动动画 */
+        @keyframes heartBeat {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(1); }
+        }
+        @keyframes heartShake {
+            0%,100% { transform: rotate(0deg); }
+            25% { transform: rotate(-4deg); }
+            75% { transform: rotate(4deg); }
+        }
+
+        .heart-beat {
+            animation: heartBeat 1.2s ease-in-out infinite !important;
+        }
+        .heart-shake {
+            animation: heartShake 2s ease-in-out infinite !important;
+        }
+
+        .fade-in { 
+            animation: fadeIn 0.8s ease-out; 
+        }
+        @keyframes fadeIn {
+            0% { opacity: 0; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .heart-icon{
+            text-shadow: 0 0 25px #ff4d6d70;
+        }
+        .calendar-day{
+            width: 42px;
+            height: 42px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            border-radius:12px;
+            font-size:18px;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-pink-100 via-rose-50 to-pink-100 min-h-screen p-4 flex flex-col items-center">
+
+<!-- 密码弹窗 -->
+<div id="login" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+        <h2 class="text-lg font-bold text-center mb-3 text-love">🔒 请输入专属密码</h2>
+        <input id="pwd" type="password" placeholder="请输入密码" class="w-full border border-pink-200 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-love">
+        <button onclick="login()" class="w-full bg-love text-white py-2 rounded-lg font-bold hover:bg-loveLight transition">进入打卡页</button>
+    </div>
+</div>
+
+<!-- 主界面 -->
+<div id="app" class="hidden w-full max-w-sm text-center">
+    <h1 class="text-2xl font-bold text-love mb-1">💘 双人爱心日历打卡 💘</h1>
+    <p id="today" class="text-gray-500 mb-2"></p>
+    <p id="tip" class="inline-block px-3 py-1 rounded-full text-sm font-medium mb-4"></p>
+
+    <!-- 爱心默认直接加跳动类，保证一进来就跳 -->
+    <div id="heart" class="text-8xl my-6 fade-in heart-beat heart-icon text-love">❤️</div>
+    <p id="state" class="text-lg font-medium text-gray-700">等待两人打卡</p>
+    <p class="text-gray-600 mb-4">已打卡 <span id="count">0</span>/2</p>
+
+    <div class="flex gap-3 justify-center mb-6">
+        <button id="ok" onclick="go(true)" class="bg-green-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-green-400 transition">✅ 完成</button>
+        <button id="no" onclick="go(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
+    </div>
+
+    <!-- 日历区域 -->
+    <div class="w-full bg-white/80 rounded-xl p-3 shadow mb-6">
+        <h3 class="font-bold text-love mb-3">📅 打卡日历（5月起）</h3>
+        <div id="calendarBox" class="grid grid-cols-6 gap-2 justify-items-center">
+            <!-- 日历由JS生成 -->
+        </div>
+    </div>
+
+    <div class="text-xs text-gray-500">
+        每月1、15号为打卡日<br>
+        全员完成标 ❤️  · 有人缺席标 💔
+    </div>
+</div>
+
+<script>
+// ================= 配置 =================
+const PASSWORD = "123456";
+const ROOM = "lovelove2025";
+const START_MONTH = 5; // 从5月1号开始
+const SIGN_DAYS = [1,15];
+// ========================================
+
+const now = new Date();
+const y = now.getFullYear(), m = now.getMonth()+1, d = now.getDate();
+const DAY_KEY = `${y}-${m}-${d}`;
+const CAN_SIGN = SIGN_DAYS.includes(d);
+
+document.getElementById("today").innerText = `${y}年${m}月${d}日`;
+
+const socket = io("wss://cloud-relay.onrender.com");
+socket.emit("join", ROOM);
+
+// 全局打卡记录
+let signRecord = JSON.parse(localStorage.getItem("signRecord")) || {};
+let state = { a: null, b: null, total: 0, day: DAY_KEY };
+
+// 密码登录
+function login() {
+    if (document.getElementById("pwd").value === PASSWORD) {
+        document.getElementById("login").classList.add("hidden");
+        document.getElementById("app").classList.remove("hidden");
+        renderCalendar();
+    } else alert("密码错误，请重新输入");
+}
+
+// 打卡
+function go(ok) {
+    if (!CAN_SIGN) return alert("今天不是打卡日，等1号/15号再来～");
+    if (localStorage.getItem("signed_" + DAY_KEY)) return alert("你今天已经打过卡啦～");
+
+    localStorage.setItem("signed_" + DAY_KEY, "1");
+    socket.emit("action", { ok, day: DAY_KEY });
+}
+
+// 同步接收
+socket.on("sync", (data) => {
+    if (data.day !== DAY_KEY) return;
+    state = data;
+    refresh();
+    // 两人都打完，归档到日历
+    if(state.total >= 2){
+        let res = (state.a && state.b) ? "ok" : "broken";
+        signRecord[DAY_KEY] = res;
+        localStorage.setItem("signRecord",JSON.stringify(signRecord));
+        renderCalendar();
+    }
+});
+
+// 刷新顶部爱心状态
+function refresh() {
+    document.getElementById("count").innerText = state.total;
+    const h = document.getElementById("heart");
+    const s = document.getElementById("state");
+    const tip = document.getElementById("tip");
+
+    if (CAN_SIGN) {
+        tip.innerText = "✅ 今日是打卡日";
+        tip.className = "bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium mb-4";
+    } else {
+        tip.innerText = "❌ 今日非打卡日";
+        tip.className = "bg-red-100 text-red-700 px-3 py-1 rounded-full text-sm font-medium mb-4";
+        document.getElementById("ok").disabled = true;
+        document.getElementById("no").disabled = true;
+        return;
+    }
+
+    if (state.total === 0) {
+        h.innerText = "❤️";
+        h.className = "text-8xl my-6 fade-in heart-beat heart-icon text-love";
+        s.innerText = "等待两人打卡";
+    } else if (state.total === 1) {
+        h.innerText = "❤️";
+        h.className = "text-8xl my-6 fade-in heart-beat heart-icon text-love";
+        s.innerText = "已1人打卡，等待另一半～";
+    } else {
+        if (state.a === false || state.b === false) {
+            h.innerText = "💔";
+            h.className = "text-8xl my-6 fade-in heart-shake text-loveBroken";
+            s.innerText = "爱心破碎了，下次要一起坚持哦";
+        } else {
+            h.innerText = "❤️";
+            h.className = "text-8xl my-6 fade-in heart-beat heart-icon text-love";
+            s.innerText = "两人都完成，爱心永远跳动 ✨";
+        }
+        document.getElementById("ok").disabled = true;
+        document.getElementById("no").disabled = true;
+    }
+}
+
+// 渲染5月起打卡日历
+function renderCalendar(){
+    let box = document.getElementById("calendarBox");
+    let html = "";
+    // 只遍历 5、6、7...当前月，每月只显示1号、15号
+    for(let month = START_MONTH; month <= m; month++){
+        for(let day of SIGN_DAYS){
+            let key = `${y}-${month}-${day}`;
+            let label = `${month}/${day}`;
+            let mark = "·";
+            let bg = "bg-gray-100";
+
+            if(signRecord[key] === "ok"){
+                mark = "❤️";
+                bg = "bg-pink-50";
+            }else if(signRecord[key] === "broken"){
+                mark = "💔";
+                bg = "bg-gray-200";
+            }
+            // 还没到的日期
+            let curDate = new Date(y,month-1,day);
+            let nowDate = new Date(y,m-1,d);
+            if(curDate > nowDate){
+                mark = "○";
+                bg = "bg-gray-50";
+            }
+
+            html += `
+                <div class="calendar-day ${bg}" title="${label}">
+                    ${mark}
+                </div>
+            `;
+        }
+    }
+    box.innerHTML = html;
+}
+
+refresh();
+renderCalendar();
+</script>
+</body>
+</html>
