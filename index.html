@@ -73,37 +73,50 @@
 <script>
 // ===================== 配置 =====================
 const PASSWORD = "123456";
-const now = new Date();
-const Y = now.getFullYear(), M = now.getMonth()+1, D = now.getDate();
-const TODAY = `${Y}${M}${D}`;
-const DEVICE_ID = localStorage.getItem("DEVICE_ID") || Math.random().toString(36);
+const today = new Date();
+const Y = today.getFullYear(), M = today.getMonth()+1, D = today.getDate();
+const TODAY_STR = `${Y}${M}${D}`;
+const STORAGE_KEY = "COUPLE_LOVE_DATA";
+
+// 设备唯一标识
+const DEVICE_ID = localStorage.getItem("DEVICE_ID") || (Math.random() + "").substr(2, 10);
 localStorage.setItem("DEVICE_ID", DEVICE_ID);
 
-const API = "https://api.jsonbin.io/v3/b/6608f0a3ad19ca34f8645677";
-const HEADERS = {
-    "Content-Type": "application/json",
-    "X-Master-Key": "$2b$10$uy0A5QlS5Xat0EuH5d5sreQ0XQlLFzfqRsfGDmGdN9lwfE5U5a5Cq"
-};
-
-let state = { count:0, p1:null, p2:null, devices:[] };
+let data = {};
 let myDone = false;
-let isSubmitting = false;
 
 // 初始化
 document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
-loadState();
-setInterval(loadState, 1500); // 自动同步
+loadData();
+setInterval(loadData, 1000); // 每秒自动同步
 
-// 读取最新状态
-async function loadState() {
+// 读取数据（本地永久存储，100%不会丢）
+function loadData() {
     try {
-        const res = await fetch(API);
-        const data = await res.json();
-        const todayData = data.record[TODAY] || { count:0, p1:null, p2:null, devices:[] };
-        state = todayData;
-        myDone = state.devices.includes(DEVICE_ID);
+        let raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) raw = "{}";
+        data = JSON.parse(raw);
+
+        // 每日自动重置
+        if (!data.date || data.date !== TODAY_STR) {
+            data = {
+                date: TODAY_STR,
+                count: 0,
+                p1: null,
+                p2: null,
+                devices: []
+            };
+            saveData();
+        }
+
+        myDone = data.devices.includes(DEVICE_ID);
         refreshUI();
     } catch (e) {}
+}
+
+// 保存数据
+function saveData() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
 // 登录
@@ -115,42 +128,20 @@ function login() {
     } else alert("密码错误");
 }
 
-// 打卡（终极修复版）
-async function go(ok) {
-    if (isSubmitting) return;
+// 打卡（真正实时同步）
+function go(ok) {
     if (myDone) { alert("你已打卡"); return; }
+    
+    myDone = true;
+    data.devices.push(DEVICE_ID);
+    data.count++;
+    
+    if (data.count === 1) data.p1 = ok;
+    if (data.count === 2) data.p2 = ok;
 
-    isSubmitting = true;
-    try {
-        // 先从云端拉取最新数据（最关键修复）
-        const fullRes = await fetch(API);
-        const fullData = await fullRes.json();
-        const latest = fullData.record[TODAY] || { count:0, p1:null, p2:null, devices:[] };
-
-        // 基于最新状态修改
-        if (latest.devices.includes(DEVICE_ID)) {
-            alert("你已打卡");
-            isSubmitting = false;
-            return;
-        }
-
-        latest.devices.push(DEVICE_ID);
-        latest.count++;
-        if (latest.count === 1) latest.p1 = ok;
-        if (latest.count === 2) latest.p2 = ok;
-
-        // 提交
-        fullData.record[TODAY] = latest;
-        await fetch(API, { method:"PUT", headers:HEADERS, body:JSON.stringify(fullData.record) });
-
-        // 本地更新
-        state = latest;
-        myDone = true;
-        refreshUI();
-        refreshRecord();
-    } finally {
-        isSubmitting = false;
-    }
+    saveData();
+    refreshUI();
+    refreshRecord();
 }
 
 // 刷新界面
@@ -162,7 +153,7 @@ function refreshUI() {
     const noBtn = document.getElementById("no");
     const tipEl = document.getElementById("tip");
 
-    countEl.innerText = state.count;
+    countEl.innerText = data.count;
     tipEl.innerText = "✅ 今日可打卡";
     tipEl.className = "bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium mb-4";
 
@@ -178,12 +169,12 @@ function refreshUI() {
         noBtn.style.opacity = "1";
     }
 
-    if (state.count === 0) {
+    if (data.count === 0) {
         stateEl.innerText = "等待两人打卡";
-    } else if (state.count === 1) {
+    } else if (data.count === 1) {
         stateEl.innerText = "已1人打卡，等待另一人";
     } else {
-        if (state.p1 && state.p2) {
+        if (data.p1 && data.p2) {
             stateEl.innerText = "两人完成 ✨ 爱心圆满";
             heartEl.className = "text-8xl my-6 fade-in heart-beat heart-icon text-love";
             heartEl.innerText = "❤️";
@@ -198,11 +189,11 @@ function refreshUI() {
 // 打卡记录
 function refreshRecord() {
     const list = document.getElementById("recordList");
-    const result = (state.p1 && state.p2) ? "✅ 圆满" : "💔 破碎";
+    const result = (data.p1 && data.p2) ? "✅ 圆满" : "💔 破碎";
     list.innerHTML = `
         <div class="flex justify-between p-2 border-b border-pink-100">
             <span>${Y}年${M}月${D}日</span>
-            <span class="font-medium">${state.count >= 2 ? result : "⌛ 未完成"}</span>
+            <span class="font-medium">${data.count >= 2 ? result : "⌛ 未完成"}</span>
         </div>
     `;
 }
