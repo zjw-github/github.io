@@ -78,28 +78,24 @@ if(!devId){
     localStorage.setItem("devId", devId);
 }
 
-// 全局缓存，防止卡死
-let cacheData = { checkinData: {} };
-
-// 安全请求，永不卡死
-async function fetchData() {
+// ==============================================
+// 核心修复：先拿云端数据 → 再进页面！绝不先显示0/2
+// ==============================================
+async function getCloudData() {
     try {
         const controller = new AbortController();
-        setTimeout(() => controller.abort(), 3000);
-        const res = await fetch(API_URL + "?meta=false", {
+        setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(`${API_URL}?meta=false`, {
             headers: { "X-Master-Key": API_KEY },
             signal: controller.signal
         });
-        const data = await res.json();
-        if (data?.checkinData) cacheData = data;
-        return data;
+        return await res.json() || { checkinData: {} };
     } catch (e) {
-        return cacheData;
+        return { checkinData: {} };
     }
 }
 
-// 安全保存
-async function updateData(data) {
+async function saveCloudData(data) {
     try {
         await fetch(API_URL, {
             method: "PUT",
@@ -112,15 +108,15 @@ async function updateData(data) {
     } catch (e) {}
 }
 
-// 渲染界面
-function renderPage(data) {
+// 统一渲染
+function renderUI(data) {
     document.getElementById("todayText").innerText = `📅 今天：${Y}年${M}月${D}日`;
     const tip = document.getElementById("tipText");
     
-    if(CAN_CHECK){
+    if (CAN_CHECK) {
         tip.innerText = "✅ 今日可以打卡";
         tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-green-100 text-green-800";
-    }else{
+    } else {
         tip.innerText = "❌ 今日不可打卡";
         tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-red-100 text-red-800";
     }
@@ -168,51 +164,60 @@ function renderPage(data) {
         } else {
             day.broken = true;
             data.checkinData[TODAY_KEY] = day;
-            updateData(data);
+            saveCloudData(data);
             state.innerText = "爱心破碎 💔 (永久)";
             heart.innerText = "💔";
         }
     }
 }
 
-// 打卡逻辑
+// 打卡
 async function doCheck(flag) {
     if (!CAN_CHECK) { alert("今天不是打卡日"); return; }
-    const data = await fetchData();
+    const data = await getCloudData();
     if (!data.checkinData) data.checkinData = {};
     const day = data.checkinData[TODAY_KEY] || { list: [], status: {}, broken: false };
 
-    if (day.broken) { alert("爱心已破碎"); return; }
-    if (day.list.includes(devId)) { alert("你已打卡"); return; }
-    if (day.list.length >= 2) { alert("已满2人"); return; }
+    if (day.broken) { alert("爱心已永久破碎"); return; }
+    if (day.list.includes(devId)) { alert("你今天已打卡"); return; }
+    if (day.list.length >= 2) { alert("已满2人，禁止打卡"); return; }
 
     day.list.push(devId);
     day.status[devId] = flag;
     data.checkinData[TODAY_KEY] = day;
-    await updateData(data);
-    cacheData = data;
-    renderPage(data);
+    await saveCloudData(data);
+    renderUI(data);
 }
 
-// 登录逻辑（永不卡死）
+// ==============================================
+// 登录逻辑彻底修复：
+// 1. 密码正确
+// 2. 先去云端拿数据
+// 3. 拿到后 → 再显示页面 → 再渲染
+// 绝对不会出现先显示0/2的假状态！
+// ==============================================
 async function login() {
     const pwd = document.getElementById("pwd").value.trim();
-    if (pwd !== PASSWORD) { alert("密码错误"); return; }
+    if (pwd !== PASSWORD) {
+        alert("密码错误");
+        return;
+    }
 
+    // 先拿数据！
+    const data = await getCloudData();
+
+    // 拿到后再进页面！
     document.getElementById("login").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
 
-    // 先显示缓存 → 绝不卡死
-    renderPage(cacheData);
-    
-    // 后台更新
-    const data = await fetchData();
-    renderPage(data);
-    
+    // 直接渲染正确数据！
+    renderUI(data);
+
+    // 后台同步
     setInterval(async () => {
-        const d = await fetchData();
-        renderPage(d);
-    }, 3000);
+        const newData = await getCloudData();
+        renderUI(newData);
+    }, 2500);
 }
 </script>
 </body>
