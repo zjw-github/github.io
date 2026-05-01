@@ -30,12 +30,10 @@
     <p id="date" class="my-1"></p>
     <p id="tip" class="font-bold my-1"></p>
 
-    <!-- 全局加载提示 -->
     <div id="loading" class="py-10 text-gray-500 hidden">
         正在读取打卡数据...
     </div>
 
-    <!-- 内容区 -->
     <div id="content">
         <div id="heart" class="text-6xl my-3 heart-animate">❤️</div>
         <p id="state" class="font-medium"></p>
@@ -57,7 +55,7 @@
 const PASSWORD = "202635";
 const BIN_ID = "69f4460d36566621a8114298";
 const API_KEY = "$2a$10$TdJa3W.GmV1iDbroiQ9myOkutegIe7QvPn5uDEnhBEPS5eDCxiq5i";
-const API = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+const API = "https://api.jsonbin.io/v3/b/" + BIN_ID;
 
 const now = new Date();
 const Y = now.getFullYear();
@@ -74,8 +72,8 @@ if (!DEVICE_ID) {
 
 let globalData = null;
 
-// 显示/隐藏加载
-function showLoading(text = "正在读取打卡数据...") {
+// 加载状态
+function showLoading(text) {
     document.getElementById("loading").innerText = text;
     document.getElementById("loading").classList.remove("hidden");
     document.getElementById("content").classList.add("hidden");
@@ -85,26 +83,41 @@ function hideLoading() {
     document.getElementById("content").classList.remove("hidden");
 }
 
-// 读取云端
+// ==============================================
+// 修复 1：读取必须用 json.record ！！！
+// ==============================================
 async function loadFromCloud() {
     try {
-        const res = await fetch(`${API}?meta=false`, { headers: { "X-Master-Key": API_KEY } });
-        const data = await res.json();
-        globalData = data || { checkinData: {} };
-        return globalData;
+        const res = await fetch(API, {
+            headers: { "X-Master-Key": API_KEY }
+        });
+        const json = await res.json();
+        const data = json.record || { checkinData: {} };
+        if (!data.checkinData) data.checkinData = {};
+        globalData = data;
+        return data;
     } catch (e) {
-        return globalData || { checkinData: {} };
+        return { checkinData: {} };
     }
 }
 
-// 保存云端
+// ==============================================
+// 修复 2：保存必须正确包装数据！！！
+// ==============================================
 async function saveToCloud(data) {
-    await fetch(API, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "X-Master-Key": API_KEY },
-        body: JSON.stringify(data)
-    });
-    globalData = data;
+    try {
+        await fetch(API, {
+            method: "PUT",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Master-Key": API_KEY
+            },
+            body: JSON.stringify(data)
+        });
+        globalData = data;
+    } catch (e) {
+        console.error("保存失败", e);
+    }
 }
 
 // 渲染
@@ -120,7 +133,7 @@ function renderAll() {
         tipEl.className = "text-red-600 font-bold my-1";
     }
 
-    const today = globalData.checkinData?.[TODAY] ?? { list: [], status: {}, broken: false };
+    const today = globalData.checkinData[TODAY] || { list: [], status: {}, broken: false };
     const count = Math.min(today.list.length, 2);
     document.getElementById("count").innerText = count;
 
@@ -178,31 +191,36 @@ function renderAll() {
 }
 
 // ==========================
-// 打卡逻辑 + 点击加载效果
+// 打卡逻辑
 // ==========================
 async function checkIn(flag) {
     if (!CAN_TODAY_CHECKIN) return alert("今天不能打卡");
 
-    // 👉 点击后立刻显示加载，用户知道正在同步
-    showLoading("正在提交并同步最新数据...");
+    const confirmText = flag ? "完成" : "缺席";
+    if (!confirm(`确定要选择【${confirmText}】吗？`)) return;
+
+    showLoading("正在提交并同步...");
 
     try {
         await loadFromCloud();
-        const day = globalData.checkinData[TODAY] ?? { list: [], status: {}, broken: false };
+
+        const day = globalData.checkinData[TODAY] || { list: [], status: {}, broken: false };
 
         if (day.broken) { alert("爱心已破碎"); return; }
-        if (day.list.includes(DEVICE_ID)) { alert("你已打卡"); return; }
-        if (day.list.length >= 2) { alert("已满2人"); return; }
+        if (day.list.includes(DEVICE_ID)) { alert("你已经打卡了"); return; }
+        if (day.list.length >= 2) { alert("今日打卡已满2人"); return; }
 
-        // 提交打卡
+        // 写入数据
         day.list.push(DEVICE_ID);
         day.status[DEVICE_ID] = flag;
+        globalData.checkinData[TODAY] = day;
+
+        // 保存到云端 ✅
         await saveToCloud(globalData);
 
-        // 刷新最新
+        // 重新读取最新
         await loadFromCloud();
     } finally {
-        // 无论成功失败，都隐藏加载
         hideLoading();
         renderAll();
     }
