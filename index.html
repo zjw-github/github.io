@@ -7,9 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @keyframes beat {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.15); }
-            100% { transform: scale(1); }
+            0% { transform: scale(1); } 50% { transform: scale(1.15); } 100% { transform: scale(1); }
         }
         .heart-animate { animation: beat 1.2s infinite; }
     </style>
@@ -32,10 +30,8 @@
     <p id="date" class="my-1"></p>
     <p id="tip" class="font-bold my-1"></p>
 
-    <!-- 加载中（不会显示任何数字） -->
     <div id="loading" class="py-10 text-gray-500">正在读取打卡数据...</div>
 
-    <!-- 内容（加载完成才显示） -->
     <div id="content" class="hidden">
         <div id="heart" class="text-6xl my-3 heart-animate">❤️</div>
         <p id="state" class="font-medium"></p>
@@ -46,7 +42,6 @@
             <button id="btn2" onclick="checkIn(false)" class="bg-red-500 text-white px-4 py-2 rounded">❌ 缺席</button>
         </div>
 
-        <!-- 打卡记录 -->
         <div class="mt-6 border-t pt-4 text-left">
             <h3 class="font-bold mb-2 text-center">📜 打卡记录</h3>
             <div id="recordList" class="text-sm max-h-40 overflow-y-auto"></div>
@@ -55,7 +50,6 @@
 </div>
 
 <script>
-// ========================== 配置 ==========================
 const PASSWORD = "202635";
 const BIN_ID = "69f4460d36566621a8114298";
 const API_KEY = "$2a$10$TdJa3W.GmV1iDbroiQ9myOkutegIe7QvPn5uDEnhBEPS5eDCxiq5i";
@@ -74,28 +68,31 @@ if (!DEVICE_ID) {
     localStorage.setItem("deviceId", DEVICE_ID);
 }
 
-// ========================== 数据操作 ==========================
 let globalData = null;
 
-async function loadData() {
+// 统一读取云端（真正的最新数据）
+async function loadFromCloud() {
     try {
         const res = await fetch(`${API}?meta=false`, { headers: { "X-Master-Key": API_KEY } });
-        return await res.json() || { checkinData: {} };
+        const data = await res.json();
+        globalData = data || { checkinData: {} };
+        return globalData;
     } catch (e) {
-        return { checkinData: {} };
+        return globalData || { checkinData: {} };
     }
 }
 
-async function saveData(data) {
-    globalData = data;
+// 保存
+async function saveToCloud(data) {
     await fetch(API, {
         method: "PUT",
         headers: { "Content-Type": "application/json", "X-Master-Key": API_KEY },
         body: JSON.stringify(data)
     });
+    globalData = data;
 }
 
-// ========================== 渲染 ==========================
+// 统一渲染
 function renderAll() {
     document.getElementById("date").innerText = `📅 ${Y}年${M}月${D}日`;
     const tipEl = document.getElementById("tip");
@@ -112,7 +109,6 @@ function renderAll() {
     const count = Math.min(today.list.length, 2);
     document.getElementById("count").innerText = count;
 
-    // 按钮状态
     const isMyDone = today.list.includes(DEVICE_ID);
     const isBroken = today.broken;
     const disabled = !CAN_TODAY_CHECKIN || isMyDone || isBroken || count >= 2;
@@ -122,7 +118,6 @@ function renderAll() {
     document.getElementById("btn1").style.opacity = disabled ? 0.4 : 1;
     document.getElementById("btn2").style.opacity = disabled ? 0.4 : 1;
 
-    // 爱心状态
     const heart = document.getElementById("heart");
     const state = document.getElementById("state");
 
@@ -147,17 +142,15 @@ function renderAll() {
         } else {
             today.broken = true;
             globalData.checkinData[TODAY] = today;
-            saveData(globalData);
+            saveToCloud(globalData);
             state.innerText = "💔 爱心破碎";
             heart.innerText = "💔";
         }
     }
 
-    // 打卡记录
     const records = globalData.checkinData || {};
     const listEl = document.getElementById("recordList");
     let html = "";
-
     Object.keys(records).sort().reverse().forEach(date => {
         const day = date.split("-")[2];
         if (day !== "1" && day !== "15") return;
@@ -166,29 +159,37 @@ function renderAll() {
         let text = item.broken ? "💔 破碎" : (cnt === 2 ? "✅ 圆满" : "⏳ 未集齐");
         html += `<div class='py-1 border-b'>${date} ${text} (${cnt}/2)</div>`;
     });
-
     listEl.innerHTML = html || "<div class='text-center py-2'>暂无记录</div>";
 }
 
-// ========================== 打卡 ==========================
+// ==========================
+// 你要的核心逻辑在这里！
+// 打卡 → 先保存 → 再强制拉云端最新数据 → 再渲染
+// 完美同步！
+// ==========================
 async function checkIn(flag) {
     if (!CAN_TODAY_CHECKIN) return alert("今天不能打卡");
-    if (!globalData) globalData = await loadData();
+    
+    // 1. 先拿最新数据
+    await loadFromCloud();
 
     const day = globalData.checkinData[TODAY] ?? { list: [], status: {}, broken: false };
-    if (day.broken) return alert("爱心已破碎，无法打卡");
-    if (day.list.includes(DEVICE_ID)) return alert("你今天已经打卡");
-    if (day.list.length >= 2) return alert("今日已达2人上限");
+    if (day.broken) { alert("爱心已破碎"); await loadFromCloud(); renderAll(); return; }
+    if (day.list.includes(DEVICE_ID)) { alert("你已打卡"); await loadFromCloud(); renderAll(); return; }
+    if (day.list.length >= 2) { alert("已满2人"); await loadFromCloud(); renderAll(); return; }
 
+    // 2. 执行打卡
     day.list.push(DEVICE_ID);
     day.status[DEVICE_ID] = flag;
     globalData.checkinData[TODAY] = day;
+    await saveToCloud(globalData);
 
-    await saveData(globalData);
+    // 3. ✅ 强制刷新云端最新数据（你要的功能）
+    await loadFromCloud();
     renderAll();
 }
 
-// ========================== 登录（正确逻辑） ==========================
+// 登录
 async function login() {
     const p = document.getElementById("pwd").value;
     if (p !== PASSWORD) return alert("密码错误");
@@ -196,13 +197,10 @@ async function login() {
     document.getElementById("login").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
 
-    // 先读取云端
-    globalData = await loadData();
+    await loadFromCloud(); // 进入时拿一次
 
-    // 读取完成再显示内容
     document.getElementById("loading").classList.add("hidden");
     document.getElementById("content").classList.remove("hidden");
-
     renderAll();
 }
 </script>
