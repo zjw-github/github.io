@@ -3,221 +3,207 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>双人爱心日历打卡</title>
+    <title>双人爱心打卡</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: { 
-                extend: { 
-                    colors: { 
-                        love: '#ff4d6d',
-                        loveLight: '#ff758f',
-                        loveBroken: '#6b7280'
-                    }
-                }
-            }
-        }
-    </script>
     <style>
-        @keyframes heartBeat {
+        @keyframes beat {
             0% { transform: scale(1); }
             50% { transform: scale(1.15); }
             100% { transform: scale(1); }
         }
-        .heart-beat { animation: heartBeat 1.2s infinite; }
-        .fade-in { animation: fadeIn 0.8s ease-out; }
-        @keyframes fadeIn { 
-            0%{opacity:0;transform:scale(0.8);}
-            100%{opacity:1;transform:scale(1);} 
-        }
+        .heart-animate { animation: beat 1.2s infinite; }
     </style>
 </head>
-<body class="bg-gradient-to-br from-pink-100 via-rose-50 to-pink-100 min-h-screen p-4 flex flex-col items-center">
 
+<body class="bg-gradient-to-br from-pink-100 to-pink-100 min-h-screen flex justify-center p-4">
+
+<!-- 登录 -->
 <div id="login" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-    <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-        <h2 class="text-lg font-bold text-center mb-3 text-love">🔒 请输入专属密码</h2>
-        <input id="pwd" type="password" placeholder="请输入密码" class="w-full border border-pink-200 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-love">
-        <button onclick="login()" class="w-full bg-love text-white py-2 rounded-lg font-bold hover:bg-loveLight transition">进入</button>
+    <div class="bg-white rounded-xl p-6 w-full max-w-sm">
+        <h2 class="text-lg font-bold text-pink-500 text-center mb-3">🔒 输入密码</h2>
+        <input id="pwd" type="password" class="border w-full p-2 rounded mb-3">
+        <button onclick="login()" class="bg-pink-500 text-white p-2 rounded w-full">进入</button>
     </div>
 </div>
 
-<div id="app" class="hidden w-full max-w-sm text-center">
-    <h1 class="text-2xl font-bold text-love mb-1">💘 双人爱心打卡 💘</h1>
+<!-- 主界面 -->
+<div id="app" class="hidden w-full max-w-sm bg-white/90 rounded-xl p-5 shadow text-center">
+    <h1 class="text-xl font-bold text-pink-500">💘 双人爱心打卡</h1>
+    <p id="date" class="my-1"></p>
+    <p id="tip" class="font-bold my-1"></p>
 
-    <p id="todayText" class="text-gray-600 font-medium text-lg mb-1"></p>
-    <p id="tipText" class="text-lg font-bold px-4 py-2 rounded-xl mb-4"></p>
+    <!-- 加载中（不会显示任何数字） -->
+    <div id="loading" class="py-10 text-gray-500">正在读取打卡数据...</div>
 
-    <div id="heart" class="text-8xl my-6 fade-in heart-beat text-love">❤️</div>
-    <p id="stateText" class="text-lg font-medium text-gray-700">加载中...</p>
-    <p class="text-gray-600 mb-4">已打卡 <span id="countText">0</span>/2</p>
+    <!-- 内容（加载完成才显示） -->
+    <div id="content" class="hidden">
+        <div id="heart" class="text-6xl my-3 heart-animate">❤️</div>
+        <p id="state" class="font-medium"></p>
+        <p class="my-2">已打卡 <span id="count">0</span>/2</p>
 
-    <div class="flex gap-3 justify-center mb-6">
-        <button id="btnOk" onclick="doCheck(true)" class="bg-green-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-green-400 transition">✅ 完成</button>
-        <button id="btnNo" onclick="doCheck(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
+        <div class="flex gap-2 justify-center mt-3">
+            <button id="btn1" onclick="checkIn(true)" class="bg-green-500 text-white px-4 py-2 rounded">✅ 完成</button>
+            <button id="btn2" onclick="checkIn(false)" class="bg-red-500 text-white px-4 py-2 rounded">❌ 缺席</button>
+        </div>
+
+        <!-- 打卡记录 -->
+        <div class="mt-6 border-t pt-4 text-left">
+            <h3 class="font-bold mb-2 text-center">📜 打卡记录</h3>
+            <div id="recordList" class="text-sm max-h-40 overflow-y-auto"></div>
+        </div>
     </div>
 </div>
 
 <script>
+// ========================== 配置 ==========================
 const PASSWORD = "202635";
-
 const BIN_ID = "69f4460d36566621a8114298";
 const API_KEY = "$2a$10$TdJa3W.GmV1iDbroiQ9myOkutegIe7QvPn5uDEnhBEPS5eDCxiq5i";
-const API_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+const API = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
 const now = new Date();
 const Y = now.getFullYear();
 const M = now.getMonth() + 1;
 const D = now.getDate();
-const TODAY_KEY = `${Y}-${M}-${D}`;
-const CAN_CHECK = M >= 5 && (D === 1 || D === 15);
+const TODAY = `${Y}-${M}-${D}`;
+const CAN_TODAY_CHECKIN = M >= 5 && (D === 1 || D === 15);
 
-let devId = localStorage.getItem("devId");
-if(!devId){
-    devId = "dev_" + Math.random().toString(36).slice(2);
-    localStorage.setItem("devId", devId);
+let DEVICE_ID = localStorage.getItem("deviceId");
+if (!DEVICE_ID) {
+    DEVICE_ID = "d_" + Math.random().toString(36).slice(4);
+    localStorage.setItem("deviceId", DEVICE_ID);
 }
 
-// ==============================================
-// 核心修复：先拿云端数据 → 再进页面！绝不先显示0/2
-// ==============================================
-async function getCloudData() {
+// ========================== 数据操作 ==========================
+let globalData = null;
+
+async function loadData() {
     try {
-        const controller = new AbortController();
-        setTimeout(() => controller.abort(), 5000);
-        const res = await fetch(`${API_URL}?meta=false`, {
-            headers: { "X-Master-Key": API_KEY },
-            signal: controller.signal
-        });
+        const res = await fetch(`${API}?meta=false`, { headers: { "X-Master-Key": API_KEY } });
         return await res.json() || { checkinData: {} };
     } catch (e) {
         return { checkinData: {} };
     }
 }
 
-async function saveCloudData(data) {
-    try {
-        await fetch(API_URL, {
-            method: "PUT",
-            headers: {
-                "Content-Type": "application/json",
-                "X-Master-Key": API_KEY
-            },
-            body: JSON.stringify(data)
-        });
-    } catch (e) {}
+async function saveData(data) {
+    globalData = data;
+    await fetch(API, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Master-Key": API_KEY },
+        body: JSON.stringify(data)
+    });
 }
 
-// 统一渲染
-function renderUI(data) {
-    document.getElementById("todayText").innerText = `📅 今天：${Y}年${M}月${D}日`;
-    const tip = document.getElementById("tipText");
-    
-    if (CAN_CHECK) {
-        tip.innerText = "✅ 今日可以打卡";
-        tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-green-100 text-green-800";
+// ========================== 渲染 ==========================
+function renderAll() {
+    document.getElementById("date").innerText = `📅 ${Y}年${M}月${D}日`;
+    const tipEl = document.getElementById("tip");
+
+    if (CAN_TODAY_CHECKIN) {
+        tipEl.innerText = "✅ 今日可打卡";
+        tipEl.className = "text-green-600 font-bold my-1";
     } else {
-        tip.innerText = "❌ 今日不可打卡";
-        tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-red-100 text-red-800";
+        tipEl.innerText = "❌ 今日不可打卡";
+        tipEl.className = "text-red-600 font-bold my-1";
     }
 
-    const checkinData = data.checkinData || {};
-    const day = checkinData[TODAY_KEY] || { list: [], status: {}, broken: false };
-    const cnt = Math.min(day.list.length, 2);
-    document.getElementById("countText").innerText = cnt;
+    const today = globalData.checkinData?.[TODAY] ?? { list: [], status: {}, broken: false };
+    const count = Math.min(today.list.length, 2);
+    document.getElementById("count").innerText = count;
 
-    const btnOk = document.getElementById("btnOk");
-    const btnNo = document.getElementById("btnNo");
-    const myDone = day.list.includes(devId);
+    // 按钮状态
+    const isMyDone = today.list.includes(DEVICE_ID);
+    const isBroken = today.broken;
+    const disabled = !CAN_TODAY_CHECKIN || isMyDone || isBroken || count >= 2;
 
-    if (day.broken) {
-        btnOk.disabled = true;
-        btnNo.disabled = true;
-    } else {
-        btnOk.disabled = !CAN_CHECK || myDone;
-        btnNo.disabled = !CAN_CHECK || myDone;
-    }
-    btnOk.style.opacity = btnOk.disabled ? 0.5 : 1;
-    btnNo.style.opacity = btnNo.disabled ? 0.5 : 1;
+    document.getElementById("btn1").disabled = disabled;
+    document.getElementById("btn2").disabled = disabled;
+    document.getElementById("btn1").style.opacity = disabled ? 0.4 : 1;
+    document.getElementById("btn2").style.opacity = disabled ? 0.4 : 1;
 
+    // 爱心状态
     const heart = document.getElementById("heart");
-    const state = document.getElementById("stateText");
+    const state = document.getElementById("state");
 
-    if (day.broken) {
-        state.innerText = "爱心永久破碎 💔";
+    if (isBroken) {
+        state.innerText = "💔 爱心永久破碎";
         heart.innerText = "💔";
         return;
     }
 
-    if (cnt === 0) {
+    if (count === 0) {
         state.innerText = "等待两人打卡";
         heart.innerText = "❤️";
-    } else if (cnt === 1) {
+    } else if (count === 1) {
         state.innerText = "已1人打卡，等待另一人";
         heart.innerText = "❤️";
     } else {
-        const s1 = day.status[day.list[0]];
-        const s2 = day.status[day.list[1]];
+        const s1 = today.status[today.list[0]];
+        const s2 = today.status[today.list[1]];
         if (s1 && s2) {
-            state.innerText = "两人完成 ✨ 爱心圆满";
+            state.innerText = "✨ 两人圆满完成";
             heart.innerText = "❤️";
         } else {
-            day.broken = true;
-            data.checkinData[TODAY_KEY] = day;
-            saveCloudData(data);
-            state.innerText = "爱心破碎 💔 (永久)";
+            today.broken = true;
+            globalData.checkinData[TODAY] = today;
+            saveData(globalData);
+            state.innerText = "💔 爱心破碎";
             heart.innerText = "💔";
         }
     }
+
+    // 打卡记录
+    const records = globalData.checkinData || {};
+    const listEl = document.getElementById("recordList");
+    let html = "";
+
+    Object.keys(records).sort().reverse().forEach(date => {
+        const day = date.split("-")[2];
+        if (day !== "1" && day !== "15") return;
+        const item = records[date];
+        const cnt = item.list?.length || 0;
+        let text = item.broken ? "💔 破碎" : (cnt === 2 ? "✅ 圆满" : "⏳ 未集齐");
+        html += `<div class='py-1 border-b'>${date} ${text} (${cnt}/2)</div>`;
+    });
+
+    listEl.innerHTML = html || "<div class='text-center py-2'>暂无记录</div>";
 }
 
-// 打卡
-async function doCheck(flag) {
-    if (!CAN_CHECK) { alert("今天不是打卡日"); return; }
-    const data = await getCloudData();
-    if (!data.checkinData) data.checkinData = {};
-    const day = data.checkinData[TODAY_KEY] || { list: [], status: {}, broken: false };
+// ========================== 打卡 ==========================
+async function checkIn(flag) {
+    if (!CAN_TODAY_CHECKIN) return alert("今天不能打卡");
+    if (!globalData) globalData = await loadData();
 
-    if (day.broken) { alert("爱心已永久破碎"); return; }
-    if (day.list.includes(devId)) { alert("你今天已打卡"); return; }
-    if (day.list.length >= 2) { alert("已满2人，禁止打卡"); return; }
+    const day = globalData.checkinData[TODAY] ?? { list: [], status: {}, broken: false };
+    if (day.broken) return alert("爱心已破碎，无法打卡");
+    if (day.list.includes(DEVICE_ID)) return alert("你今天已经打卡");
+    if (day.list.length >= 2) return alert("今日已达2人上限");
 
-    day.list.push(devId);
-    day.status[devId] = flag;
-    data.checkinData[TODAY_KEY] = day;
-    await saveCloudData(data);
-    renderUI(data);
+    day.list.push(DEVICE_ID);
+    day.status[DEVICE_ID] = flag;
+    globalData.checkinData[TODAY] = day;
+
+    await saveData(globalData);
+    renderAll();
 }
 
-// ==============================================
-// 登录逻辑彻底修复：
-// 1. 密码正确
-// 2. 先去云端拿数据
-// 3. 拿到后 → 再显示页面 → 再渲染
-// 绝对不会出现先显示0/2的假状态！
-// ==============================================
+// ========================== 登录（正确逻辑） ==========================
 async function login() {
-    const pwd = document.getElementById("pwd").value.trim();
-    if (pwd !== PASSWORD) {
-        alert("密码错误");
-        return;
-    }
+    const p = document.getElementById("pwd").value;
+    if (p !== PASSWORD) return alert("密码错误");
 
-    // 先拿数据！
-    const data = await getCloudData();
-
-    // 拿到后再进页面！
     document.getElementById("login").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
 
-    // 直接渲染正确数据！
-    renderUI(data);
+    // 先读取云端
+    globalData = await loadData();
 
-    // 后台同步
-    setInterval(async () => {
-        const newData = await getCloudData();
-        renderUI(newData);
-    }, 2500);
+    // 读取完成再显示内容
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("content").classList.remove("hidden");
+
+    renderAll();
 }
 </script>
 </body>
