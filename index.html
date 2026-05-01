@@ -32,197 +32,190 @@
         .heart-beat { animation: heartBeat 1.2s infinite; }
         .heart-shake { animation: heartShake 2s infinite; }
         .fade-in { animation: fadeIn 0.8s ease-out; }
-        @keyframes fadeIn { 0%{opacity:0;transform:scale(0.8);}100%{opacity:1;transform:scale(1);} }
+        @keyframes fadeIn { 
+            0%{opacity:0;transform:scale(0.8);}
+            100%{opacity:1;transform:scale(1);} 
+        }
         .heart-icon{text-shadow:0 0 25px #ff4d6d70;}
     </style>
 </head>
 <body class="bg-gradient-to-br from-pink-100 via-rose-50 to-pink-100 min-h-screen p-4 flex flex-col items-center">
 
-<!-- 密码弹窗 -->
 <div id="login" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
     <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
         <h2 class="text-lg font-bold text-center mb-3 text-love">🔒 请输入专属密码</h2>
-        <input id="pwd" type="password" placeholder="请输入密码" class="w-full border border-pink-20 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-love">
+        <input id="pwd" type="password" placeholder="请输入密码" class="w-full border border-pink-200 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-love">
         <button onclick="login()" class="w-full bg-love text-white py-2 rounded-lg font-bold hover:bg-loveLight transition">进入</button>
     </div>
 </div>
 
-<!-- 主界面 -->
 <div id="app" class="hidden w-full max-w-sm text-center">
-    <h1 class="text-2xl font-bold text-love mb-1">💘 双人爱心打卡 💘</h1>
-    <p id="today" class="text-gray-500 mb-2"></p>
-    <p id="tip" class="inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 bg-green-100 text-green-700"></p>
+    <h1 class="text-2xl font-bold text-love mb-3">💘 双人爱心打卡 💘</h1>
+    
+    <!-- 日期显示位置 -->
+    <p id="todayDate" class="text-gray-600 text-base mb-2"></p>
+    <!-- 打卡可否提示 -->
+    <p id="tipText" class="px-3 py-1 rounded-full text-sm font-medium mb-4"></p>
 
     <div id="heart" class="text-8xl my-6 fade-in heart-beat heart-icon text-love">❤️</div>
     <p id="state" class="text-lg font-medium text-gray-700">等待两人打卡</p>
     <p class="text-gray-600 mb-4">已打卡 <span id="count">0</span>/2</p>
 
     <div class="flex gap-3 justify-center mb-6">
-        <button id="ok" onclick="go(true)" class="bg-green-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-green-400 transition">✅ 完成</button>
-        <button id="no" onclick="go(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
-    </div>
-
-    <div class="w-full bg-white/80 rounded-xl p-4 shadow-md text-left mt-2">
-        <h3 class="font-bold text-love mb-3">📜 打卡记录</h3>
-        <div id="recordList" class="space-y-2 text-sm text-gray-700">
-            <div class="text-gray-400">暂无记录</div>
-        </div>
+        <button id="okBtn" onclick="doCheck(true)" class="bg-green-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-green-400 transition">✅ 完成</button>
+        <button id="noBtn" onclick="doCheck(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
     </div>
 </div>
 
 <script>
-// 配置
 const PASSWORD = "123456";
+const CLOUD_API = "https://jsonblob.com/api/jsonBlob/1352625482790739968";
+
+// 固定初始化日期
 const now = new Date();
 const Y = now.getFullYear();
 const M = now.getMonth() + 1;
 const D = now.getDate();
-const TODAY_STR = `${Y}-${M}-${D}`;
-// 仅1号、15号可打卡
-const IS_CHECK_DAY = D === 1 || D === 15;
+const TODAY_KEY = `${Y}-${M}-${D}`;
 
-// 生成本设备固定唯一ID（本机永久不变）
-if(!localStorage.getItem("SELF_DEVICE_ID")){
-    localStorage.setItem("SELF_DEVICE_ID", "dev_" + Math.random().toString(36).slice(2));
+// 规则：仅5月及以后 每月1、15号可打卡
+const IS_AFTER_MAY = M >= 5;
+const IS_1OR15 = D === 1 || D === 15;
+const CAN_CHECK = IS_AFTER_MAY && IS_1OR15;
+
+// 生成设备ID
+if(!localStorage.getItem("devId")){
+    localStorage.setItem("devId","dev_" + Math.random().toString(36).slice(2));
 }
-const SELF_ID = localStorage.getItem("SELF_DEVICE_ID");
+const SELF_DEV_ID = localStorage.getItem("devId");
+let todayData = { members:[], status:{} };
 
-let globalData = {
-    date: TODAY_STR,
-    users: [],
-    p1: null,
-    p2: null
-};
-
-// 每秒同步一次状态
-setInterval(fetchCloudData, 1000);
-
-window.onload = function(){
-    document.getElementById("today").innerText = `${Y}年${M}月${D}日`;
-    fetchCloudData();
-}
-
-// 从仓库data.json拉取云端数据
-async function fetchCloudData(){
-    try{
-        let res = await fetch("data.json?r=" + Math.random());
-        let data = await res.json();
-        // 日期不一样 → 自动重置今日空状态
-        if(data.date !== TODAY_STR){
-            globalData = {
-                date: TODAY_STR,
-                users: [],
-                p1: null,
-                p2: null
-            };
-        }else{
-            globalData = data;
-        }
-    }catch(e){
-        // 拉取失败也用今日空状态
-        globalData = {
-            date: TODAY_STR,
-            users: [],
-            p1: null,
-            p2: null
-        };
+// 拉取云端数据
+async function syncGetCloud() {
+    try {
+        const res = await fetch(CLOUD_API + "?_t=" + Date.now());
+        return await res.json();
+    } catch (e) {
+        return {};
     }
-    renderUI();
 }
 
-// 保存状态到本地临时（靠每秒同步给对方看）
-function saveLocalData(){
-    let jsonStr = JSON.stringify(globalData);
-    // 本地存一份兜底
-    localStorage.setItem("cloud_cache", jsonStr);
+// 保存云端数据
+async function syncSetCloud(data) {
+    await fetch(CLOUD_API, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+    });
+}
+
+// 初始化当日
+async function initToday() {
+    const all = await syncGetCloud();
+    if(!all[TODAY_KEY]) {
+        all[TODAY_KEY] = { members:[], status:{} };
+        await syncSetCloud(all);
+    }
+    todayData = all[TODAY_KEY];
+    renderPage();
 }
 
 // 登录
-function login(){
+async function login(){
     let pwd = document.getElementById("pwd").value.trim();
     if(pwd === PASSWORD){
         document.getElementById("login").classList.add("hidden");
         document.getElementById("app").classList.remove("hidden");
+        // 一进来先强制渲染日期
+        renderPage();
+        await initToday();
+        setInterval(async ()=>{
+            const all = await syncGetCloud();
+            todayData = all[TODAY_KEY] || { members:[], status:{} };
+            renderPage();
+        }, 3000);
     }else{
         alert("密码错误");
     }
 }
 
-// 打卡操作
-async function go(okFlag){
-    if(!IS_CHECK_DAY){
-        alert("今天不是打卡日，无需打卡");
+// 打卡
+async function doCheck(flag){
+    if(!CAN_CHECK){
+        alert("今日不在打卡范围，无法打卡");
         return;
     }
-    // 先拉最新
-    await fetchCloudData();
-    // 自己已打卡禁止重复
-    if(globalData.users.includes(SELF_ID)){
-        alert("你今日已经打过卡了");
+    const all = await syncGetCloud();
+    todayData = all[TODAY_KEY];
+
+    if(todayData.members.includes(SELF_DEV_ID)){
+        alert("你今日已完成打卡");
         return;
     }
-    // 满2人禁止
-    if(globalData.users.length >= 2){
-        alert("今日双人打卡已完成");
+    if(todayData.members.length >= 2){
+        alert("今日双人打卡已满");
         return;
     }
 
-    // 加入当前设备
-    globalData.users.push(SELF_ID);
-    if(globalData.users.length === 1){
-        globalData.p1 = okFlag;
-    }
-    if(globalData.users.length === 2){
-        globalData.p2 = okFlag;
-    }
-
-    saveLocalData();
-    renderUI();
+    todayData.members.push(SELF_DEV_ID);
+    todayData.status[SELF_DEV_ID] = flag;
+    all[TODAY_KEY] = todayData;
+    await syncSetCloud(all);
+    renderPage();
 }
 
-// 渲染界面 完全保留你原来样式
-function renderUI(){
+// 渲染页面（强制显示日期+提示）
+function renderPage(){
+    // 强制写入日期 必显示
+    document.getElementById("todayDate").innerText = `📅 ${Y}年${M}月${D}日`;
+
     const countEl = document.getElementById("count");
     const stateEl = document.getElementById("state");
     const heartEl = document.getElementById("heart");
-    const okBtn = document.getElementById("ok");
-    const noBtn = document.getElementById("no");
-    const tipEl = document.getElementById("tip");
+    const okBtn = document.getElementById("okBtn");
+    const noBtn = document.getElementById("noBtn");
+    const tipEl = document.getElementById("tipText");
 
-    countEl.innerText = globalData.users.length;
+    const currCount = Math.min(todayData.members.length, 2);
+    countEl.innerText = currCount;
 
-    // 打卡日期提示
-    if (IS_CHECK_DAY) {
-        tipEl.innerText = "✅ 今日需要打卡";
-        tipEl.className = "inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 bg-green-100 text-green-700";
-    } else {
-        tipEl.innerText = "ℹ️ 今天无需打卡";
-        tipEl.className = "inline-block px-3 py-1 rounded-full text-sm font-medium mb-4 bg-blue-100 text-blue-700";
-        okBtn.disabled = true;
-        noBtn.disabled = true;
-        okBtn.style.opacity = 0.5;
-        noBtn.style.opacity = 0.5;
-        return;
+    // 打卡提示文案+颜色
+    if(CAN_CHECK){
+        tipEl.innerText = "✅ 今日可打卡（5月后每月1/15号）";
+        tipEl.className = "px-3 py-1 rounded-full text-sm font-medium mb-4 bg-green-100 text-green-700";
+    }else{
+        if(!IS_AFTER_MAY){
+            tipEl.innerText = "❌ 1-4月不开启打卡";
+        }else{
+            tipEl.innerText = "❌ 今日不是1/15号，无需打卡";
+        }
+        tipEl.className = "px-3 py-1 rounded-full text-sm font-medium mb-4 bg-red-100 text-red-700";
     }
 
-    // 判断自己是否已打卡
-    let myDone = globalData.users.includes(SELF_ID);
-    okBtn.disabled = myDone;
-    noBtn.disabled = myDone;
-    okBtn.style.opacity = myDone ? 0.5 : 1;
-    noBtn.style.opacity = myDone ? 0.5 : 1;
+    // 按钮禁用
+    const myDone = todayData.members.includes(SELF_DEV_ID);
+    okBtn.disabled = !CAN_CHECK || myDone;
+    noBtn.disabled = !CAN_CHECK || myDone;
+    okBtn.style.opacity = okBtn.disabled ? 0.5 : 1;
+    noBtn.style.opacity = noBtn.disabled ? 0.5 : 1;
 
-    // 状态文字与爱心样式
-    if (globalData.users.length === 0) {
+    // 爱心状态
+    if(currCount === 0){
         stateEl.innerText = "等待两人打卡";
-    } else if (globalData.users.length === 1) {
+        heartEl.className = "text-8xl my-6 fade-in heart-beat heart-icon text-love";
+        heartEl.innerText = "❤️";
+    }else if(currCount === 1){
         stateEl.innerText = "已1人打卡，等待另一人";
-    } else {
-        if (globalData.p1 && globalData.p2) {
+        heartEl.className = "text-8xl my-6 fade-in heart-beat heart-icon text-love";
+        heartEl.innerText = "❤️";
+    }else{
+        let s1 = todayData.status[todayData.members[0]];
+        let s2 = todayData.status[todayData.members[1]];
+        if(s1 && s2){
             stateEl.innerText = "两人完成 ✨ 爱心圆满";
             heartEl.className = "text-8xl my-6 fade-in heart-beat heart-icon text-love";
             heartEl.innerText = "❤️";
-        } else {
+        }else{
             stateEl.innerText = "爱心破碎 💔";
             heartEl.className = "text-8xl my-6 fade-in heart-shake text-loveBroken";
             heartEl.innerText = "💔";
