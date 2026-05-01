@@ -30,9 +30,11 @@
     <p id="date" class="my-1"></p>
     <p id="tip" class="font-bold my-1"></p>
 
-    <div id="loading" class="py-10 text-gray-500">正在读取打卡数据...</div>
+    <div id="loading" class="py-10 text-gray-500 hidden">
+        正在读取打卡数据...
+    </div>
 
-    <div id="content" class="hidden">
+    <div id="content">
         <div id="heart" class="text-6xl my-3 heart-animate">❤️</div>
         <p id="state" class="font-medium"></p>
         <p class="my-2">已打卡 <span id="count">0</span>/2</p>
@@ -70,7 +72,18 @@ if (!DEVICE_ID) {
 
 let globalData = null;
 
-// 统一读取云端（真正的最新数据）
+// 加载状态
+function showLoading(text = "正在读取打卡数据...") {
+    document.getElementById("loading").innerText = text;
+    document.getElementById("loading").classList.remove("hidden");
+    document.getElementById("content").classList.add("hidden");
+}
+function hideLoading() {
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("content").classList.remove("hidden");
+}
+
+// 读取 + 保存
 async function loadFromCloud() {
     try {
         const res = await fetch(`${API}?meta=false`, { headers: { "X-Master-Key": API_KEY } });
@@ -82,7 +95,6 @@ async function loadFromCloud() {
     }
 }
 
-// 保存
 async function saveToCloud(data) {
     await fetch(API, {
         method: "PUT",
@@ -92,7 +104,7 @@ async function saveToCloud(data) {
     globalData = data;
 }
 
-// 统一渲染
+// 渲染
 function renderAll() {
     document.getElementById("date").innerText = `📅 ${Y}年${M}月${D}日`;
     const tipEl = document.getElementById("tip");
@@ -163,30 +175,38 @@ function renderAll() {
 }
 
 // ==========================
-// 你要的核心逻辑在这里！
-// 打卡 → 先保存 → 再强制拉云端最新数据 → 再渲染
-// 完美同步！
+// 打卡 + 确认弹窗 + 加载
 // ==========================
 async function checkIn(flag) {
     if (!CAN_TODAY_CHECKIN) return alert("今天不能打卡");
-    
-    // 1. 先拿最新数据
-    await loadFromCloud();
 
-    const day = globalData.checkinData[TODAY] ?? { list: [], status: {}, broken: false };
-    if (day.broken) { alert("爱心已破碎"); await loadFromCloud(); renderAll(); return; }
-    if (day.list.includes(DEVICE_ID)) { alert("你已打卡"); await loadFromCloud(); renderAll(); return; }
-    if (day.list.length >= 2) { alert("已满2人"); await loadFromCloud(); renderAll(); return; }
+    // 🔥 确认弹窗
+    const text = flag ? "完成" : "缺席";
+    const ok = confirm(`你确认选择【${text}】吗？`);
+    if (!ok) return;
 
-    // 2. 执行打卡
-    day.list.push(DEVICE_ID);
-    day.status[DEVICE_ID] = flag;
-    globalData.checkinData[TODAY] = day;
-    await saveToCloud(globalData);
+    // 显示加载
+    showLoading("正在提交并同步最新数据...");
 
-    // 3. ✅ 强制刷新云端最新数据（你要的功能）
-    await loadFromCloud();
-    renderAll();
+    try {
+        await loadFromCloud();
+        const day = globalData.checkinData[TODAY] ?? { list: [], status: {}, broken: false };
+
+        if (day.broken) { alert("爱心已破碎"); return; }
+        if (day.list.includes(DEVICE_ID)) { alert("你已打卡"); return; }
+        if (day.list.length >= 2) { alert("已满2人"); return; }
+
+        // 提交
+        day.list.push(DEVICE_ID);
+        day.status[DEVICE_ID] = flag;
+        await saveToCloud(globalData);
+
+        // 刷新最新
+        await loadFromCloud();
+    } finally {
+        hideLoading();
+        renderAll();
+    }
 }
 
 // 登录
@@ -197,10 +217,9 @@ async function login() {
     document.getElementById("login").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
 
-    await loadFromCloud(); // 进入时拿一次
-
-    document.getElementById("loading").classList.add("hidden");
-    document.getElementById("content").classList.remove("hidden");
+    showLoading("正在读取打卡数据...");
+    await loadFromCloud();
+    hideLoading();
     renderAll();
 }
 </script>
