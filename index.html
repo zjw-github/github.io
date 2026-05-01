@@ -24,14 +24,19 @@
             50% { transform: scale(1.15); }
             100% { transform: scale(1); }
         }
+        @keyframes heartShake {
+            0%,100% { transform: rotate(0); }
+            25% { transform: rotate(-5deg); }
+            75% { transform: rotate(5deg); }
+        }
         .heart-beat { animation: heartBeat 1.2s infinite; }
+        .heart-shake { animation: heartShake 2s infinite; }
         .fade-in { animation: fadeIn 0.8s ease-out; }
         @keyframes fadeIn { 
             0%{opacity:0;transform:scale(0.8);}
             100%{opacity:1;transform:scale(1);} 
         }
         .heart-icon{text-shadow:0 0 25px #ff4d6d70;}
-        .record-item{border-bottom:1px solid #eee; padding:6px 0;}
     </style>
 </head>
 <body class="bg-gradient-to-br from-pink-100 via-rose-50 to-pink-100 min-h-screen p-4 flex flex-col items-center">
@@ -51,26 +56,20 @@
     <p id="tipText" class="text-lg font-bold px-4 py-2 rounded-xl mb-4"></p>
 
     <div id="heart" class="text-8xl my-6 fade-in heart-beat heart-icon text-love">❤️</div>
-    <p id="stateText" class="text-lg font-medium text-gray-700">加载中...</p>
+    <p id="stateText" class="text-lg font-medium text-gray-700">等待两人打卡</p>
     <p class="text-gray-600 mb-4">已打卡 <span id="countText">0</span>/2</p>
 
     <div class="flex gap-3 justify-center mb-6">
         <button id="btnOk" onclick="doCheck(true)" class="bg-green-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-green-400 transition">✅ 完成</button>
         <button id="btnNo" onclick="doCheck(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
     </div>
-
-    <div class="w-full bg-white/70 rounded-xl p-3 mt-4">
-        <h3 class="font-bold text-gray-700 mb-2">📜 打卡记录</h3>
-        <div id="recordList" class="text-sm text-gray-600 max-h-48 overflow-y-auto">
-            暂无记录
-        </div>
-    </div>
 </div>
 
 <script>
 const PASSWORD = "202635";
 
-const BIN_ID = "69f4404e856a68218992fb05";
+// ===================== 你自己的 jsonbin 配置 =====================
+const BIN_ID = "69f4460d36566621a8114298";
 const API_KEY = "$2a$10$TdJa3W.GmV1iDbroiQ9myOkutegIe7QvPn5uDEnhBEPS5eDCxiq5i";
 const API_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
@@ -87,83 +86,38 @@ if(!devId){
     localStorage.setItem("devId", devId);
 }
 
-// ==============================================
-// 优化 1：加超时 + 快速失败，不让页面一直卡
-// ==============================================
-async function getCloudData() {
-    try {
-        const controller = new AbortController();
-        setTimeout(() => controller.abort(), 3000); // 3秒超时
-
+async function getCloudData(){
+    try{
         let res = await fetch(API_URL + "?meta=false", {
-            headers: { "X-Master-Key": API_KEY },
-            signal: controller.signal
+            headers: { "X-Master-Key": API_KEY }
         });
-        return await res.json() || { checkinData: {} };
-    } catch (e) {
+        let json = await res.json();
+        return json;
+    }catch(e){
         return { checkinData: {} };
     }
 }
 
 async function saveCloudData(data){
-    try {
-        await fetch(API_URL,{
-            method:"PUT",
-            headers:{
-                "Content-Type":"application/json",
-                "X-Master-Key": API_KEY
-            },
-            body:JSON.stringify(data)
-        });
-    } catch(e) {}
+    await fetch(API_URL,{
+        method:"PUT",
+        headers:{
+            "Content-Type":"application/json",
+            "X-Master-Key": API_KEY
+        },
+        body:JSON.stringify(data)
+    });
 }
 
-function renderRecord(data){
-    const checkinData = data.checkinData || {};
-    const recordList = document.getElementById("recordList");
-    const keys = Object.keys(checkinData).sort().reverse();
-
-    let html = "";
-    let hasRecord = false;
-
-    for(let k of keys){
-        let dayNum = parseInt(k.split("-")[2]);
-        if(dayNum !== 1 && dayNum !== 15) continue;
-        hasRecord = true;
-        let item = checkinData[k];
-        let cnt = item.list ? item.list.length : 0;
-        let statusTxt = item.broken ? "💔 爱心破碎" : (cnt === 2 ? "❤️ 圆满完成" : "⏳ 未集齐两人");
-        html += `<div class="record-item">${k} &nbsp; ${statusTxt} &nbsp; ${cnt}/2</div>`;
-    }
-    recordList.innerHTML = hasRecord ? html : "<div class='py-2'>暂无打卡记录</div>";
-}
-
-// ==============================================
-// 优化 2：先显示本地缓存 → 再后台同步
-// ==============================================
-let lastData = { checkinData: {} };
-
-async function renderUI(showCacheFirst = false) {
-    if (showCacheFirst && lastData) {
-        updateUI(lastData);
-    }
-
-    const data = await getCloudData();
-    if (data && data.checkinData) {
-        lastData = data;
-        updateUI(data);
-    }
-}
-
-function updateUI(data) {
+function renderUI(data={}){
     document.getElementById("todayText").innerText = `📅 今天：${Y}年${M}月${D}日`;
     const tip = document.getElementById("tipText");
     
     if(CAN_CHECK){
-        tip.innerText = "✅ 今日是打卡日";
+        tip.innerText = "✅ 今日可以打卡";
         tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-green-100 text-green-800";
     }else{
-        tip.innerText = "❌ 今日非打卡日";
+        tip.innerText = "❌ 今日不可打卡";
         tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-red-100 text-red-800";
     }
 
@@ -177,6 +131,9 @@ function updateUI(data) {
     let btnOk = document.getElementById("btnOk");
     let btnNo = document.getElementById("btnNo");
     
+    // ==============================================
+    // 核心：一旦爱心破碎 → 永久禁用所有按钮！
+    // ==============================================
     if (day.broken) {
         btnOk.disabled = true;
         btnNo.disabled = true;
@@ -191,10 +148,16 @@ function updateUI(data) {
     let heart = document.getElementById("heart");
     let state = document.getElementById("stateText");
 
+    // ==============================================
+    // 核心：一旦破碎 → 永久显示破碎状态
+    // ==============================================
     if (day.broken) {
         state.innerText = "爱心永久破碎 💔";
         heart.innerText = "💔";
-    } else if(cnt === 0){
+        return;
+    }
+
+    if(cnt === 0){
         state.innerText = "等待两人打卡";
         heart.innerText = "❤️";
     }else if(cnt === 1){
@@ -208,17 +171,20 @@ function updateUI(data) {
             state.innerText = "两人完成 ✨ 爱心圆满";
             heart.innerText = "❤️";
         }else{
+            // 标记：永久破碎
+            day.broken = true;
+            data.checkinData[TODAY_KEY] = day;
+            saveCloudData(data);
+            
             state.innerText = "爱心破碎 💔 (永久)";
             heart.innerText = "💔";
         }
     }
-
-    renderRecord(data);
 }
 
 async function doCheck(flag){
     if(!CAN_CHECK){
-        alert("今天不是打卡日期，仅5月后每月1/15号可打卡");
+        alert("今天不是打卡日");
         return;
     }
     let data = await getCloudData();
@@ -226,6 +192,7 @@ async function doCheck(flag){
     
     let day = data.checkinData[TODAY_KEY] || { list:[], status:{}, broken: false };
     
+    // 已经破碎 → 禁止操作
     if (day.broken) {
         alert("爱心已永久破碎，无法操作");
         return;
@@ -236,7 +203,7 @@ async function doCheck(flag){
         return;
     }
     if(day.list.length >=2){
-        alert("今日双人打卡已满，禁止第三人打卡");
+        alert("今日双人打卡已满");
         return;
     }
 
@@ -244,8 +211,7 @@ async function doCheck(flag){
     day.status[devId] = flag;
     data.checkinData[TODAY_KEY] = day;
     await saveCloudData(data);
-    lastData = data;
-    updateUI(data);
+    renderUI(data);
 }
 
 async function login(){
@@ -253,14 +219,12 @@ async function login(){
     if(pwd === PASSWORD){
         document.getElementById("login").classList.add("hidden");
         document.getElementById("app").classList.remove("hidden");
-        
-        // ==============================================
-        // 优化 3：一登录立刻显示，不等待网络
-        // ==============================================
-        renderUI(true);
-
-        // 后台同步
-        setInterval(() => renderUI(), 2500);
+        let data = await getCloudData();
+        renderUI(data);
+        setInterval(async ()=>{
+            let d = await getCloudData();
+            renderUI(d);
+        }, 2500);
     }else{
         alert("密码错误");
     }
@@ -268,4 +232,3 @@ async function login(){
 </script>
 </body>
 </html>
-     
