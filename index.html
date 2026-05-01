@@ -1,117 +1,234 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>双人约定打卡</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box;}
-body{background:#f8f9fa;font-family:"Microsoft Yahei",sans-serif;padding:40px 20px;}
-.box{max-width:420px;margin:0 auto;background:#fff;border-radius:24px;padding:35px 25px;box-shadow:0 8px 30px rgba(0,0,0,0.08);text-align:center;}
-h2{color:#333;margin-bottom:20px;}
-.tip{color:#666;font-size:15px;margin:10px 0;}
-.count{font-size:18px;color:#222;margin:25px 0;}
-.btn-wrap{margin-top:30px;}
-.btn{padding:13px 28px;border-radius:50px;border:none;font-size:16px;margin:0 8px;cursor:pointer;transition:.2s;}
-.btn-ok{background:#409eff;color:#fff;}
-.btn-no{background:#eee;color:#666;}
-.btn:disabled{opacity:0.45;cursor:not-allowed;}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>双人爱心日历打卡</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { 
+                extend: { 
+                    colors: { 
+                        love: '#ff4d6d',
+                        loveLight: '#ff758f',
+                        loveBroken: '#6b7280'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes heartBeat {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(1); }
+        }
+        @keyframes heartShake {
+            0%,100% { transform: rotate(0); }
+            25% { transform: rotate(-5deg); }
+            75% { transform: rotate(5deg); }
+        }
+        .heart-beat { animation: heartBeat 1.2s infinite; }
+        .heart-shake { animation: heartShake 2s infinite; }
+        .fade-in { animation: fadeIn 0.8s ease-out; }
+        @keyframes fadeIn { 
+            0%{opacity:0;transform:scale(0.8);}
+            100%{opacity:1;transform:scale(1);} 
+        }
+        .heart-icon{text-shadow:0 0 25px #ff4d6d70;}
+    </style>
 </head>
-<body>
-<div class="box">
-  <h2>💘 双人约定打卡</h2>
-  <div class="tip" id="dateTip"></div>
-  <div class="tip" id="statusTip">等待打卡</div>
-  <div class="count">已打卡：<span id="cnt">0</span>/2</div>
-  <div class="btn-wrap">
-    <button class="btn btn-ok" id="btn1" onclick="checkIn(1)">✅ 完成打卡</button>
-    <button class="btn btn-no" id="btn2" onclick="checkIn(0)">❌ 今日缺席</button>
-  </div>
+<body class="bg-gradient-to-br from-pink-100 via-rose-50 to-pink-100 min-h-screen p-4 flex flex-col items-center">
+
+<div id="login" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+        <h2 class="text-lg font-bold text-center mb-3 text-love">🔒 请输入专属密码</h2>
+        <input id="pwd" type="password" placeholder="请输入密码" class="w-full border border-pink-200 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-love">
+        <button onclick="login()" class="w-full bg-love text-white py-2 rounded-lg font-bold hover:bg-loveLight transition">进入</button>
+    </div>
+</div>
+
+<div id="app" class="hidden w-full max-w-sm text-center">
+    <h1 class="text-2xl font-bold text-love mb-1">💘 双人爱心打卡 💘</h1>
+
+    <p id="todayText" class="text-gray-600 font-medium text-lg mb-1"></p>
+    <p id="tipText" class="text-lg font-bold px-4 py-2 rounded-xl mb-4"></p>
+
+    <div id="heart" class="text-8xl my-6 fade-in heart-beat heart-icon text-love">❤️</div>
+    <p id="stateText" class="text-lg font-medium text-gray-700">等待两人打卡</p>
+    <p class="text-gray-600 mb-4">已打卡 <span id="countText">0</span>/2</p>
+
+    <div class="flex gap-3 justify-center mb-6">
+        <button id="btnOk" onclick="doCheck(true)" class="bg-green-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-green-400 transition">✅ 完成</button>
+        <button id="btnNo" onclick="doCheck(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
+    </div>
 </div>
 
 <script>
-const API = "https://love-api-temp.vercel.app/api/data";
+const PASSWORD = "123456";
+
+// ===================== 你自己的 jsonbin 配置 =====================
+const BIN_ID = "69f42d85856a68218992b395";
+const API_KEY = "$2a$10$TdJa3W.GmV1iDbroiQ9myOkutegIe7QvPn5uDEnhBEPS5eDCxiq5i";
+const API_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+
+const now = new Date();
+const Y = now.getFullYear();
+const M = now.getMonth() + 1;
+const D = now.getDate();
+const TODAY_KEY = `${Y}-${M}-${D}`;
+const CAN_CHECK = M >= 5 && (D === 1 || D === 15);
 
 let devId = localStorage.getItem("devId");
 if(!devId){
-  devId = "dev_" + Date.now() + "_" + Math.floor(Math.random()*10000);
-  localStorage.setItem("devId", devId);
+    devId = "dev_" + Math.random().toString(36).slice(2);
+    localStorage.setItem("devId", devId);
 }
 
-const now = new Date();
-const y = now.getFullYear();
-const m = now.getMonth() + 1;
-const d = now.getDate();
-const dayKey = `${y}-${m}-${d}`;
-const canCheck = m >= 5 && (d === 1 || d === 15);
-
-async function getDB() {
-  try {
-    let res = await fetch(API + "?t=" + Date.now());
-    return await res.json();
-  } catch (e) {
-    return {};
-  }
+async function getCloudData(){
+    try{
+        let res = await fetch(API_URL + "?meta=false", {
+            headers: { "X-Master-Key": API_KEY }
+        });
+        let json = await res.json();
+        return json;
+    }catch(e){
+        return { checkinData: {} };
+    }
 }
 
-async function setDB(data) {
-  await fetch(API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
-  });
+async function saveCloudData(data){
+    await fetch(API_URL,{
+        method:"PUT",
+        headers:{
+            "Content-Type":"application/json",
+            "X-Master-Key": API_KEY
+        },
+        body:JSON.stringify(data)
+    });
 }
 
-async function render() {
-  let db = await getDB();
-  if (!db[dayKey]) db[dayKey] = { list: [], status: {} };
-  let dayData = db[dayKey];
+function renderUI(data={}){
+    document.getElementById("todayText").innerText = `📅 今天：${Y}年${M}月${D}日`;
+    const tip = document.getElementById("tipText");
+    
+    if(CAN_CHECK){
+        tip.innerText = "✅ 今日可以打卡";
+        tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-green-100 text-green-800";
+    }else{
+        tip.innerText = "❌ 今日不可打卡";
+        tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-red-100 text-red-800";
+    }
 
-  document.getElementById("dateTip").innerText = `${y}年${m}月${d}号 ${canCheck ? "✅ 今日可打卡" : "❌ 非打卡日"}`;
-  document.getElementById("cnt").innerText = dayData.list.length > 2 ? 2 : dayData.list.length;
+    const checkinData = data.checkinData || {};
+    if(!checkinData[TODAY_KEY]) checkinData[TODAY_KEY] = { list:[], status:{}, broken: false };
+    let day = checkinData[TODAY_KEY];
+    let cnt = Math.min(day.list.length, 2);
+    document.getElementById("countText").innerText = cnt;
 
-  let hasDone = dayData.list.includes(devId);
-  document.getElementById("btn1").disabled = !canCheck || hasDone;
-  document.getElementById("btn2").disabled = !canCheck || hasDone;
+    let myDone = day.list.includes(devId);
+    let btnOk = document.getElementById("btnOk");
+    let btnNo = document.getElementById("btnNo");
+    
+    // ==============================================
+    // 核心：一旦爱心破碎 → 永久禁用所有按钮！
+    // ==============================================
+    if (day.broken) {
+        btnOk.disabled = true;
+        btnNo.disabled = true;
+    } else {
+        btnOk.disabled = !CAN_CHECK || myDone;
+        btnNo.disabled = !CAN_CHECK || myDone;
+    }
 
-  let statusDom = document.getElementById("statusTip");
-  if (dayData.list.length === 0) {
-    statusDom.innerText = "等待两人打卡";
-  } else if (dayData.list.length === 1) {
-    statusDom.innerText = "已有一人打卡，等待对方";
-  } else {
-    let allOk = Object.values(dayData.status).every(v=>v===1);
-    statusDom.innerText = allOk ? "双方都完成打卡 ✨" : "有一方缺席 💔";
-  }
+    btnOk.style.opacity = btnOk.disabled ? 0.5 : 1;
+    btnNo.style.opacity = btnNo.disabled ? 0.5 : 1;
+
+    let heart = document.getElementById("heart");
+    let state = document.getElementById("stateText");
+
+    // ==============================================
+    // 核心：一旦破碎 → 永久显示破碎状态
+    // ==============================================
+    if (day.broken) {
+        state.innerText = "爱心永久破碎 💔";
+        heart.innerText = "💔";
+        return;
+    }
+
+    if(cnt === 0){
+        state.innerText = "等待两人打卡";
+        heart.innerText = "❤️";
+    }else if(cnt === 1){
+        state.innerText = "已1人打卡，等待另一人";
+        heart.innerText = "❤️";
+    }else{
+        let s1 = day.status[day.list[0]];
+        let s2 = day.status[day.list[1]];
+        
+        if(s1 && s2){
+            state.innerText = "两人完成 ✨ 爱心圆满";
+            heart.innerText = "❤️";
+        }else{
+            // 标记：永久破碎
+            day.broken = true;
+            data.checkinData[TODAY_KEY] = day;
+            saveCloudData(data);
+            
+            state.innerText = "爱心破碎 💔 (永久)";
+            heart.innerText = "💔";
+        }
+    }
 }
 
-async function checkIn(flag) {
-  if (!canCheck) {
-    alert("今天不是规定打卡日期");
-    return;
-  }
-  let db = await getDB();
-  if (!db[dayKey]) db[dayKey] = { list: [], status: {} };
-  let dayData = db[dayKey];
+async function doCheck(flag){
+    if(!CAN_CHECK){
+        alert("今天不是打卡日");
+        return;
+    }
+    let data = await getCloudData();
+    if (!data.checkinData) data.checkinData = {};
+    
+    let day = data.checkinData[TODAY_KEY] || { list:[], status:{}, broken: false };
+    
+    // 已经破碎 → 禁止操作
+    if (day.broken) {
+        alert("爱心已永久破碎，无法操作");
+        return;
+    }
 
-  if (dayData.list.includes(devId)) {
-    alert("你今天已经打过卡了");
-    return;
-  }
-  if (dayData.list.length >= 2) {
-    alert("今日双人打卡已满");
-    return;
-  }
+    if(day.list.includes(devId)){
+        alert("你今天已经打过卡了");
+        return;
+    }
+    if(day.list.length >=2){
+        alert("今日双人打卡已满");
+        return;
+    }
 
-  dayData.list.push(devId);
-  dayData.status[devId] = flag;
-  await setDB(db);
-  render();
+    day.list.push(devId);
+    day.status[devId] = flag;
+    data.checkinData[TODAY_KEY] = day;
+    await saveCloudData(data);
+    renderUI(data);
 }
 
-render();
-setInterval(render, 2500);
+async function login(){
+    let pwd = document.getElementById("pwd").value.trim();
+    if(pwd === PASSWORD){
+        document.getElementById("login").classList.add("hidden");
+        document.getElementById("app").classList.remove("hidden");
+        let data = await getCloudData();
+        renderUI(data);
+        setInterval(async ()=>{
+            let d = await getCloudData();
+            renderUI(d);
+        }, 2500);
+    }else{
+        alert("密码错误");
+    }
+}
 </script>
 </body>
 </html>
