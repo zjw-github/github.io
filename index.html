@@ -59,7 +59,6 @@
         <button id="btnNo" onclick="doCheck(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
     </div>
 
-    <!-- 新增：打卡记录区域 -->
     <div class="w-full bg-white/70 rounded-xl p-3 mt-4">
         <h3 class="font-bold text-gray-700 mb-2">📜 打卡记录</h3>
         <div id="recordList" class="text-sm text-gray-600 max-h-48 overflow-y-auto">
@@ -69,10 +68,9 @@
 </div>
 
 <script>
-const PASSWORD = "123456";
+const PASSWORD = "202635";
 
-// 你的专属 jsonbin 配置
-const BIN_ID = "69f42d85856a68218992b395";
+const BIN_ID = "69f4404e856a68218992fb05";
 const API_KEY = "$2a$10$TdJa3W.GmV1iDbroiQ9myOkutegIe7QvPn5uDEnhBEPS5eDCxiq5i";
 const API_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
@@ -81,8 +79,6 @@ const Y = now.getFullYear();
 const M = now.getMonth() + 1;
 const D = now.getDate();
 const TODAY_KEY = `${Y}-${M}-${D}`;
-
-// 核心规则：仅5月及以后 每月1号、15号可打卡
 const CAN_CHECK = M >= 5 && (D === 1 || D === 15);
 
 let devId = localStorage.getItem("devId");
@@ -91,65 +87,75 @@ if(!devId){
     localStorage.setItem("devId", devId);
 }
 
-async function getCloudData(){
-    try{
+// ==============================================
+// 优化 1：加超时 + 快速失败，不让页面一直卡
+// ==============================================
+async function getCloudData() {
+    try {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 3000); // 3秒超时
+
         let res = await fetch(API_URL + "?meta=false", {
-            headers: { "X-Master-Key": API_KEY }
+            headers: { "X-Master-Key": API_KEY },
+            signal: controller.signal
         });
-        let json = await res.json();
-        return json;
-    }catch(e){
+        return await res.json() || { checkinData: {} };
+    } catch (e) {
         return { checkinData: {} };
     }
 }
 
 async function saveCloudData(data){
-    await fetch(API_URL,{
-        method:"PUT",
-        headers:{
-            "Content-Type":"application/json",
-            "X-Master-Key": API_KEY
-        },
-        body:JSON.stringify(data)
-    });
+    try {
+        await fetch(API_URL,{
+            method:"PUT",
+            headers:{
+                "Content-Type":"application/json",
+                "X-Master-Key": API_KEY
+            },
+            body:JSON.stringify(data)
+        });
+    } catch(e) {}
 }
 
-// 渲染打卡记录
 function renderRecord(data){
     const checkinData = data.checkinData || {};
     const recordList = document.getElementById("recordList");
-    const keys = Object.keys(checkinData).sort().reverse(); // 倒序，最新在上面
+    const keys = Object.keys(checkinData).sort().reverse();
 
     let html = "";
     let hasRecord = false;
 
     for(let k of keys){
-        // 只展示 1号、15号 记录
         let dayNum = parseInt(k.split("-")[2]);
         if(dayNum !== 1 && dayNum !== 15) continue;
-
         hasRecord = true;
         let item = checkinData[k];
         let cnt = item.list ? item.list.length : 0;
-        let statusTxt = "";
-
-        if(item.broken){
-            statusTxt = "💔 爱心破碎";
-        }else if(cnt === 2){
-            statusTxt = "❤️ 圆满完成";
-        }else{
-            statusTxt = "⏳ 未集齐两人";
-        }
-
+        let statusTxt = item.broken ? "💔 爱心破碎" : (cnt === 2 ? "❤️ 圆满完成" : "⏳ 未集齐两人");
         html += `<div class="record-item">${k} &nbsp; ${statusTxt} &nbsp; ${cnt}/2</div>`;
     }
-
     recordList.innerHTML = hasRecord ? html : "<div class='py-2'>暂无打卡记录</div>";
 }
 
-async function renderUI(){
+// ==============================================
+// 优化 2：先显示本地缓存 → 再后台同步
+// ==============================================
+let lastData = { checkinData: {} };
+
+async function renderUI(showCacheFirst = false) {
+    if (showCacheFirst && lastData) {
+        updateUI(lastData);
+    }
+
     const data = await getCloudData();
-    
+    if (data && data.checkinData) {
+        lastData = data;
+        updateUI(data);
+    }
+}
+
+function updateUI(data) {
     document.getElementById("todayText").innerText = `📅 今天：${Y}年${M}月${D}日`;
     const tip = document.getElementById("tipText");
     
@@ -188,10 +194,7 @@ async function renderUI(){
     if (day.broken) {
         state.innerText = "爱心永久破碎 💔";
         heart.innerText = "💔";
-        return;
-    }
-
-    if(cnt === 0){
+    } else if(cnt === 0){
         state.innerText = "等待两人打卡";
         heart.innerText = "❤️";
     }else if(cnt === 1){
@@ -205,16 +208,11 @@ async function renderUI(){
             state.innerText = "两人完成 ✨ 爱心圆满";
             heart.innerText = "❤️";
         }else{
-            day.broken = true;
-            data.checkinData[TODAY_KEY] = day;
-            saveCloudData(data);
-            
             state.innerText = "爱心破碎 💔 (永久)";
             heart.innerText = "💔";
         }
     }
 
-    // 渲染打卡记录
     renderRecord(data);
 }
 
@@ -246,8 +244,8 @@ async function doCheck(flag){
     day.status[devId] = flag;
     data.checkinData[TODAY_KEY] = day;
     await saveCloudData(data);
-    
-    await renderUI();
+    lastData = data;
+    updateUI(data);
 }
 
 async function login(){
@@ -256,11 +254,13 @@ async function login(){
         document.getElementById("login").classList.add("hidden");
         document.getElementById("app").classList.remove("hidden");
         
-        await renderUI();
-        
-        setInterval(async ()=>{
-            await renderUI();
-        }, 2000);
+        // ==============================================
+        // 优化 3：一登录立刻显示，不等待网络
+        // ==============================================
+        renderUI(true);
+
+        // 后台同步
+        setInterval(() => renderUI(), 2500);
     }else{
         alert("密码错误");
     }
@@ -268,3 +268,4 @@ async function login(){
 </script>
 </body>
 </html>
+     
