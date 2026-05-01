@@ -24,19 +24,14 @@
             50% { transform: scale(1.15); }
             100% { transform: scale(1); }
         }
-        @keyframes heartShake {
-            0%,100% { transform: rotate(0); }
-            25% { transform: rotate(-5deg); }
-            75% { transform: rotate(5deg); }
-        }
         .heart-beat { animation: heartBeat 1.2s infinite; }
-        .heart-shake { animation: heartShake 2s infinite; }
         .fade-in { animation: fadeIn 0.8s ease-out; }
         @keyframes fadeIn { 
             0%{opacity:0;transform:scale(0.8);}
             100%{opacity:1;transform:scale(1);} 
         }
         .heart-icon{text-shadow:0 0 25px #ff4d6d70;}
+        .record-item{border-bottom:1px solid #eee; padding:6px 0;}
     </style>
 </head>
 <body class="bg-gradient-to-br from-pink-100 via-rose-50 to-pink-100 min-h-screen p-4 flex flex-col items-center">
@@ -56,19 +51,27 @@
     <p id="tipText" class="text-lg font-bold px-4 py-2 rounded-xl mb-4"></p>
 
     <div id="heart" class="text-8xl my-6 fade-in heart-beat heart-icon text-love">❤️</div>
-    <p id="stateText" class="text-lg font-medium text-gray-700">等待两人打卡</p>
+    <p id="stateText" class="text-lg font-medium text-gray-700">加载中...</p>
     <p class="text-gray-600 mb-4">已打卡 <span id="countText">0</span>/2</p>
 
     <div class="flex gap-3 justify-center mb-6">
         <button id="btnOk" onclick="doCheck(true)" class="bg-green-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-green-400 transition">✅ 完成</button>
         <button id="btnNo" onclick="doCheck(false)" class="bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-red-400 transition">❌ 缺席</button>
     </div>
+
+    <!-- 新增：打卡记录区域 -->
+    <div class="w-full bg-white/70 rounded-xl p-3 mt-4">
+        <h3 class="font-bold text-gray-700 mb-2">📜 打卡记录</h3>
+        <div id="recordList" class="text-sm text-gray-600 max-h-48 overflow-y-auto">
+            暂无记录
+        </div>
+    </div>
 </div>
 
 <script>
-const PASSWORD = "202635";
+const PASSWORD = "123456";
 
-// ===================== 你自己的 jsonbin 配置 =====================
+// 你的专属 jsonbin 配置
 const BIN_ID = "69f42d85856a68218992b395";
 const API_KEY = "$2a$10$TdJa3W.GmV1iDbroiQ9myOkutegIe7QvPn5uDEnhBEPS5eDCxiq5i";
 const API_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
@@ -78,6 +81,8 @@ const Y = now.getFullYear();
 const M = now.getMonth() + 1;
 const D = now.getDate();
 const TODAY_KEY = `${Y}-${M}-${D}`;
+
+// 核心规则：仅5月及以后 每月1号、15号可打卡
 const CAN_CHECK = M >= 5 && (D === 1 || D === 15);
 
 let devId = localStorage.getItem("devId");
@@ -109,15 +114,50 @@ async function saveCloudData(data){
     });
 }
 
-function renderUI(data={}){
+// 渲染打卡记录
+function renderRecord(data){
+    const checkinData = data.checkinData || {};
+    const recordList = document.getElementById("recordList");
+    const keys = Object.keys(checkinData).sort().reverse(); // 倒序，最新在上面
+
+    let html = "";
+    let hasRecord = false;
+
+    for(let k of keys){
+        // 只展示 1号、15号 记录
+        let dayNum = parseInt(k.split("-")[2]);
+        if(dayNum !== 1 && dayNum !== 15) continue;
+
+        hasRecord = true;
+        let item = checkinData[k];
+        let cnt = item.list ? item.list.length : 0;
+        let statusTxt = "";
+
+        if(item.broken){
+            statusTxt = "💔 爱心破碎";
+        }else if(cnt === 2){
+            statusTxt = "❤️ 圆满完成";
+        }else{
+            statusTxt = "⏳ 未集齐两人";
+        }
+
+        html += `<div class="record-item">${k} &nbsp; ${statusTxt} &nbsp; ${cnt}/2</div>`;
+    }
+
+    recordList.innerHTML = hasRecord ? html : "<div class='py-2'>暂无打卡记录</div>";
+}
+
+async function renderUI(){
+    const data = await getCloudData();
+    
     document.getElementById("todayText").innerText = `📅 今天：${Y}年${M}月${D}日`;
     const tip = document.getElementById("tipText");
     
     if(CAN_CHECK){
-        tip.innerText = "✅ 今日可以打卡";
+        tip.innerText = "✅ 今日是打卡日";
         tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-green-100 text-green-800";
     }else{
-        tip.innerText = "❌ 今日不可打卡";
+        tip.innerText = "❌ 今日非打卡日";
         tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-red-100 text-red-800";
     }
 
@@ -131,9 +171,6 @@ function renderUI(data={}){
     let btnOk = document.getElementById("btnOk");
     let btnNo = document.getElementById("btnNo");
     
-    // ==============================================
-    // 核心：一旦爱心破碎 → 永久禁用所有按钮！
-    // ==============================================
     if (day.broken) {
         btnOk.disabled = true;
         btnNo.disabled = true;
@@ -148,9 +185,6 @@ function renderUI(data={}){
     let heart = document.getElementById("heart");
     let state = document.getElementById("stateText");
 
-    // ==============================================
-    // 核心：一旦破碎 → 永久显示破碎状态
-    // ==============================================
     if (day.broken) {
         state.innerText = "爱心永久破碎 💔";
         heart.innerText = "💔";
@@ -171,7 +205,6 @@ function renderUI(data={}){
             state.innerText = "两人完成 ✨ 爱心圆满";
             heart.innerText = "❤️";
         }else{
-            // 标记：永久破碎
             day.broken = true;
             data.checkinData[TODAY_KEY] = day;
             saveCloudData(data);
@@ -180,11 +213,14 @@ function renderUI(data={}){
             heart.innerText = "💔";
         }
     }
+
+    // 渲染打卡记录
+    renderRecord(data);
 }
 
 async function doCheck(flag){
     if(!CAN_CHECK){
-        alert("今天不是打卡日");
+        alert("今天不是打卡日期，仅5月后每月1/15号可打卡");
         return;
     }
     let data = await getCloudData();
@@ -192,7 +228,6 @@ async function doCheck(flag){
     
     let day = data.checkinData[TODAY_KEY] || { list:[], status:{}, broken: false };
     
-    // 已经破碎 → 禁止操作
     if (day.broken) {
         alert("爱心已永久破碎，无法操作");
         return;
@@ -203,7 +238,7 @@ async function doCheck(flag){
         return;
     }
     if(day.list.length >=2){
-        alert("今日双人打卡已满");
+        alert("今日双人打卡已满，禁止第三人打卡");
         return;
     }
 
@@ -211,7 +246,8 @@ async function doCheck(flag){
     day.status[devId] = flag;
     data.checkinData[TODAY_KEY] = day;
     await saveCloudData(data);
-    renderUI(data);
+    
+    await renderUI();
 }
 
 async function login(){
@@ -219,12 +255,12 @@ async function login(){
     if(pwd === PASSWORD){
         document.getElementById("login").classList.add("hidden");
         document.getElementById("app").classList.remove("hidden");
-        let data = await getCloudData();
-        renderUI(data);
+        
+        await renderUI();
+        
         setInterval(async ()=>{
-            let d = await getCloudData();
-            renderUI(d);
-        }, 2500);
+            await renderUI();
+        }, 2000);
     }else{
         alert("密码错误");
     }
