@@ -56,7 +56,7 @@
     <p id="tipText" class="text-lg font-bold px-4 py-2 rounded-xl mb-4"></p>
 
     <div id="heart" class="text-8xl my-6 fade-in heart-beat heart-icon text-love">❤️</div>
-    <p id="stateText" class="text-lg font-medium text-gray-700">等待两人打卡</p>
+    <p id="stateText" class="text-lg font-medium text-gray-700">加载中...</p>
     <p class="text-gray-600 mb-4">已打卡 <span id="countText">0</span>/2</p>
 
     <div class="flex gap-3 justify-center mb-6">
@@ -68,7 +68,7 @@
 <script>
 const PASSWORD = "202635";
 
-// ===================== 你自己的 jsonbin 配置 =====================
+// 你的配置
 const BIN_ID = "69f4460d36566621a8114298";
 const API_KEY = "$2a$10$TdJa3W.GmV1iDbroiQ9myOkutegIe7QvPn5uDEnhBEPS5eDCxiq5i";
 const API_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
@@ -86,149 +86,23 @@ if(!devId){
     localStorage.setItem("devId", devId);
 }
 
+// 全局缓存，防止跳变
+let lastData = null;
+
+// 带超时的安全请求
 async function getCloudData(){
-    try{
+    try {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 4000);
+        
         let res = await fetch(API_URL + "?meta=false", {
-            headers: { "X-Master-Key": API_KEY }
+            headers: { "X-Master-Key": API_KEY },
+            signal: controller.signal
         });
-        let json = await res.json();
-        return json;
-    }catch(e){
-        return { checkinData: {} };
+        return await res.json() || { checkinData: {} };
+    } catch(e) {
+        return lastData || { checkinData: {} };
     }
 }
 
 async function saveCloudData(data){
-    await fetch(API_URL,{
-        method:"PUT",
-        headers:{
-            "Content-Type":"application/json",
-            "X-Master-Key": API_KEY
-        },
-        body:JSON.stringify(data)
-    });
-}
-
-function renderUI(data={}){
-    document.getElementById("todayText").innerText = `📅 今天：${Y}年${M}月${D}日`;
-    const tip = document.getElementById("tipText");
-    
-    if(CAN_CHECK){
-        tip.innerText = "✅ 今日可以打卡";
-        tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-green-100 text-green-800";
-    }else{
-        tip.innerText = "❌ 今日不可打卡";
-        tip.className = "text-lg font-bold px-4 py-2 rounded-xl mb-4 bg-red-100 text-red-800";
-    }
-
-    const checkinData = data.checkinData || {};
-    if(!checkinData[TODAY_KEY]) checkinData[TODAY_KEY] = { list:[], status:{}, broken: false };
-    let day = checkinData[TODAY_KEY];
-    let cnt = Math.min(day.list.length, 2);
-    document.getElementById("countText").innerText = cnt;
-
-    let myDone = day.list.includes(devId);
-    let btnOk = document.getElementById("btnOk");
-    let btnNo = document.getElementById("btnNo");
-    
-    // ==============================================
-    // 核心：一旦爱心破碎 → 永久禁用所有按钮！
-    // ==============================================
-    if (day.broken) {
-        btnOk.disabled = true;
-        btnNo.disabled = true;
-    } else {
-        btnOk.disabled = !CAN_CHECK || myDone;
-        btnNo.disabled = !CAN_CHECK || myDone;
-    }
-
-    btnOk.style.opacity = btnOk.disabled ? 0.5 : 1;
-    btnNo.style.opacity = btnNo.disabled ? 0.5 : 1;
-
-    let heart = document.getElementById("heart");
-    let state = document.getElementById("stateText");
-
-    // ==============================================
-    // 核心：一旦破碎 → 永久显示破碎状态
-    // ==============================================
-    if (day.broken) {
-        state.innerText = "爱心永久破碎 💔";
-        heart.innerText = "💔";
-        return;
-    }
-
-    if(cnt === 0){
-        state.innerText = "等待两人打卡";
-        heart.innerText = "❤️";
-    }else if(cnt === 1){
-        state.innerText = "已1人打卡，等待另一人";
-        heart.innerText = "❤️";
-    }else{
-        let s1 = day.status[day.list[0]];
-        let s2 = day.status[day.list[1]];
-        
-        if(s1 && s2){
-            state.innerText = "两人完成 ✨ 爱心圆满";
-            heart.innerText = "❤️";
-        }else{
-            // 标记：永久破碎
-            day.broken = true;
-            data.checkinData[TODAY_KEY] = day;
-            saveCloudData(data);
-            
-            state.innerText = "爱心破碎 💔 (永久)";
-            heart.innerText = "💔";
-        }
-    }
-}
-
-async function doCheck(flag){
-    if(!CAN_CHECK){
-        alert("今天不是打卡日");
-        return;
-    }
-    let data = await getCloudData();
-    if (!data.checkinData) data.checkinData = {};
-    
-    let day = data.checkinData[TODAY_KEY] || { list:[], status:{}, broken: false };
-    
-    // 已经破碎 → 禁止操作
-    if (day.broken) {
-        alert("爱心已永久破碎，无法操作");
-        return;
-    }
-
-    if(day.list.includes(devId)){
-        alert("你今天已经打过卡了");
-        return;
-    }
-    if(day.list.length >=2){
-        alert("今日双人打卡已满");
-        return;
-    }
-
-    day.list.push(devId);
-    day.status[devId] = flag;
-    data.checkinData[TODAY_KEY] = day;
-    await saveCloudData(data);
-    renderUI(data);
-}
-
-async function login(){
-    let pwd = document.getElementById("pwd").value.trim();
-    if(pwd === PASSWORD){
-        document.getElementById("login").classList.add("hidden");
-        document.getElementById("app").classList.remove("hidden");
-        let data = await getCloudData();
-        renderUI(data);
-        setInterval(async ()=>{
-            let d = await getCloudData();
-            renderUI(d);
-        }, 2500);
-    }else{
-        alert("密码错误");
-    }
-}
-</script>
-</body>
-</html>
